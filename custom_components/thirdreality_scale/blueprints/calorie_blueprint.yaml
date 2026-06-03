@@ -1,0 +1,481 @@
+# ============================================================
+# 🔥 卡路里追踪蓝图 - Calorie Tracker Blueprint
+# ============================================================
+# 
+# 功能说明：
+# - 用户从预设食物列表中选择，或手动输入自定义食物名称和卡路里值
+# - 秤实时称重，仪表盘实时显示当前卡路里
+# - 点 Add 添加到当餐记录，点 Finish Meal 结束这餐（累加到今日总计）
+# - 预设了约40种美国常见食物的每100g卡路里值，用户可在蓝图配置中修改
+# - 支持 Zigbee2MQTT 和 ZHA
+# - 🔊 语音播报：添加确认、高热量警告、每餐总结、每日超标提醒
+#
+# 注意：这是一个"事件驱动"的蓝图，由 Add 按钮触发
+# 实时卡路里显示由 template sensor 在仪表盘上完成
+# ============================================================
+
+blueprint:
+  name: "🔥 Calorie Tracker / 卡路里追踪"
+  description: >
+    Track calories of your food using the ThirdReality Smart Scale.
+    
+    **How it works:**
+    1. Select a food from the preset dropdown, or enter a custom food name and cal/100g value
+    2. Place the food on the scale
+    3. Press "Add ➕" to log it to your current meal
+    4. Press "Finish Meal ✅" to add the meal subtotal to today's total
+    
+    🔊 **Smart Voice Features:**
+    - Confirms each food added with name, weight, and calories
+    - Warns when adding high-calorie foods (>400 cal/100g)
+    - Alerts when meal exceeds target
+    - Provides meal summary with remaining daily budget
+    
+    Includes ~40 common American foods with calories per 100g.
+    Works with both Zigbee2MQTT and ZHA. No phone needed.
+
+  domain: automation
+  author: "ThirdReality"
+  homeassistant:
+    min_version: "2024.1.0"
+
+  input:
+    # ==================== 平台与设备 ====================
+    platform_type:
+      name: "🔌 Platform"
+      description: "Select your Zigbee platform."
+      default: "z2m"
+      selector:
+        select:
+          options:
+            - label: "Zigbee2MQTT"
+              value: "z2m"
+            - label: "ZHA"
+              value: "zha"
+
+    z2m_device_topic:
+      name: "📡 Z2M Device Topic"
+      description: "Zigbee2MQTT friendly_name or IEEE address. Example: 0xaa97282c02b36898"
+      default: ""
+      selector:
+        text:
+
+    zha_ieee_address:
+      name: "📡 ZHA IEEE Address"
+      description: "IEEE address in ZHA. Leave empty if using Z2M."
+      default: ""
+      selector:
+        text:
+
+    # ==================== Voice Announcements ====================
+    tts_enable:
+      name: "🔊 Enable Voice Announcements"
+      description: >
+        Enable TTS voice announcements through your smart speaker.
+        Announces food additions, meal summaries, and calorie warnings.
+      default: true
+      selector:
+        boolean:
+
+    tts_speaker:
+      name: "🔈 Speaker Entity"
+      description: >
+        The media_player entity for voice announcements.
+        For ThirdReality HA Speaker: media_player.3rspk_xxxxxxxxxxxx_media_player
+      default: {}
+      selector:
+        entity:
+          filter:
+            - domain: media_player
+
+    tts_engine:
+      name: "🗣️ TTS Engine Entity"
+      description: >
+        The TTS engine entity. For Piper: tts.piper
+        Go to Developer Tools → States → search "tts" to find yours.
+      default: "tts.piper"
+      selector:
+        text:
+
+    daily_calorie_target:
+      name: "🎯 Daily Calorie Target / 每日卡路里目标"
+      description: >
+        Your daily calorie target. Used for voice warnings when exceeded.
+        Default: 2000 kcal
+      default: 2000
+      selector:
+        number:
+          min: 500
+          max: 5000
+          step: 100
+          unit_of_measurement: "kcal"
+
+    meal_calorie_warning:
+      name: "⚠️ Meal Calorie Warning / 单餐警告阈值"
+      description: >
+        Warn when a single meal exceeds this value.
+        Default: 800 kcal
+      default: 800
+      selector:
+        number:
+          min: 200
+          max: 3000
+          step: 100
+          unit_of_measurement: "kcal"
+
+    # ==================== 控件 ====================
+    food_selector:
+      name: "🍎 Food Preset Selector / 预设食物下拉框"
+      description: >
+        An input_select with food names matching the preset list below.
+        / 预设食物下拉框，选项需与下方食物数据库名称一致。
+      selector:
+        entity:
+          filter:
+            - domain: input_select
+
+    weight_sensor:
+      name: "⚖️ Scale Weight Sensor / 秤重量传感器"
+      description: >
+        The weight sensor entity from your scale.
+        / 秤的重量传感器实体。
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+
+    custom_food_name:
+      name: "✏️ Custom Food Name Entity / 自定义食物名称"
+      description: >
+        An input_text for users to enter custom food name.
+        / 用户输入自定义食物名称的 input_text。
+      selector:
+        entity:
+          filter:
+            - domain: input_text
+
+    custom_cal_entity:
+      name: "✏️ Custom Cal/100g Entity / 自定义卡路里值"
+      description: >
+        An input_number for users to enter custom calories per 100g.
+        / 用户输入每100g卡路里值的 input_number。
+      selector:
+        entity:
+          filter:
+            - domain: input_number
+
+    add_button:
+      name: "➕ Add Button / 添加按钮"
+      description: "Press to add current food to meal log."
+      selector:
+        entity:
+          filter:
+            - domain: input_button
+
+    finish_meal_button:
+      name: "✅ Finish Meal Button / 结束这餐按钮"
+      description: "Press to finish current meal and add to today's total."
+      selector:
+        entity:
+          filter:
+            - domain: input_button
+
+    reset_today_button:
+      name: "🗑️ Reset Today Button / 重置今日按钮"
+      description: "Press to reset today's total calories."
+      selector:
+        entity:
+          filter:
+            - domain: input_button
+
+    meal_cal_entity:
+      name: "🍽️ Meal Calories Entity / 当餐卡路里"
+      description: "An input_number to store current meal subtotal."
+      selector:
+        entity:
+          filter:
+            - domain: input_number
+
+    today_cal_entity:
+      name: "📊 Today Calories Entity / 今日总卡路里"
+      description: "An input_number to store today's total calories."
+      selector:
+        entity:
+          filter:
+            - domain: input_number
+
+    status_entity:
+      name: "📋 Status Display Entity / 状态显示"
+      description: "An input_text to show current status on dashboard (max 255)."
+      selector:
+        entity:
+          filter:
+            - domain: input_text
+
+    meal_log_entity:
+      name: "📝 Meal Log Entity / 当餐记录"
+      description: "An input_text to store meal log (max 255)."
+      selector:
+        entity:
+          filter:
+            - domain: input_text
+
+    # ==================== 食物数据库（每100g卡路里，用户可修改）====================
+    food_database:
+      name: "🗃️ Food Database / 食物数据库"
+      description: >
+        Format: food_name:cal_per_100g,food_name:cal_per_100g,...
+        Users can modify these values! Common American foods pre-filled.
+        / 格式：食物名:每100g卡路里,... 用户可自由修改！已预填美国常见食物。
+      default: "Apple:52,Banana:89,Orange:47,Strawberry:32,Blueberry:57,Grapes:69,Watermelon:30,Avocado:160,Chicken Breast:165,Ground Beef:250,Salmon:208,Shrimp:85,Tuna:130,Bacon:541,Turkey:135,Egg:155,Rice (cooked):130,Pasta (cooked):131,Bread (white):265,Bread (wheat):247,Oatmeal:68,Cereal:379,Potato:77,Sweet Potato:86,Corn:96,Broccoli:34,Carrot:41,Spinach:23,Tomato:18,Lettuce:15,Onion:40,Cheese (cheddar):403,Milk (whole):61,Milk (skim):34,Yogurt (plain):59,Butter:717,Peanut Butter:588,Almonds:579,Walnuts:654,Olive Oil:884,Honey:304,Sugar:387,Chocolate:546,Ice Cream:207,Pizza:266,Hamburger:295,French Fries:312,Hot Dog:290,Steak:271,Tofu:76"
+      selector:
+        text:
+          multiline: true
+
+mode: parallel
+max: 3
+
+trigger:
+  - platform: state
+    entity_id: !input add_button
+    id: "add"
+  - platform: state
+    entity_id: !input finish_meal_button
+    id: "finish"
+  - platform: state
+    entity_id: !input reset_today_button
+    id: "reset"
+
+variables:
+  platform: !input platform_type
+  z2m_topic: !input z2m_device_topic
+  food_db_raw: !input food_database
+  food_select_entity: !input food_selector
+  weight_entity: !input weight_sensor
+  custom_name_entity: !input custom_food_name
+  custom_cal_num_entity: !input custom_cal_entity
+  meal_log_eid: !input meal_log_entity
+  meal_cal_eid: !input meal_cal_entity
+  today_cal_eid: !input today_cal_entity
+  tts_enabled: !input tts_enable
+  tts_speaker_entity: !input tts_speaker
+  tts_engine_entity: !input tts_engine
+  daily_target: !input daily_calorie_target
+  meal_warning: !input meal_calorie_warning
+  selected_food: "{{ states(food_select_entity) }}"
+  current_weight: "{{ states(weight_entity) | float(0) }}"
+  custom_name: "{{ states(custom_name_entity) | trim }}"
+  custom_cal: "{{ states(custom_cal_num_entity) | float(0) }}"
+  # 决定使用预设还是自定义
+  use_custom: "{{ custom_name | length > 0 and custom_cal > 0 }}"
+  food_name: "{% if use_custom %}{{ custom_name }}{% else %}{{ selected_food }}{% endif %}"
+  # 从数据库中查找预设食物的卡路里值
+  cal_per_100g: "{% if use_custom %}{{ custom_cal }}{% else %}{% set found = namespace(val=0) %}{% for item in food_db_raw.split(',') %}{% set parts = item.split(':') %}{% if parts | length == 2 and parts[0] | trim == selected_food %}{% set found.val = parts[1] | trim | float(0) %}{% endif %}{% endfor %}{{ found.val }}{% endif %}"
+  # 计算当前卡路里
+  current_cal: "{{ (current_weight | float(0) * cal_per_100g | float(0) / 100) | round(0) }}"
+  # 当前记录（通过变量引用实体ID）
+  current_meal_log: "{{ states(meal_log_eid) }}"
+  current_meal_cal: "{{ states(meal_cal_eid) | float(0) }}"
+  current_today_cal: "{{ states(today_cal_eid) | float(0) }}"
+
+action:
+  - choose:
+      # ============================================================
+      # ADD: 添加当前食物到这餐记录
+      # ============================================================
+      - conditions:
+          - condition: trigger
+            id: "add"
+        sequence:
+          # 验证
+          - if:
+              - condition: template
+                value_template: "{{ cal_per_100g | float == 0 }}"
+            then:
+              - service: input_text.set_value
+                target:
+                  entity_id: !input status_entity
+                data:
+                  value: "❌ Unknown food or no cal data. Select a preset or enter custom values."
+              - stop: "No calorie data"
+
+          - if:
+              - condition: template
+                value_template: "{{ current_weight | float(0) <= 0 }}"
+            then:
+              - service: input_text.set_value
+                target:
+                  entity_id: !input status_entity
+                data:
+                  value: "❌ No weight. Place food on the scale first."
+              - stop: "No weight"
+
+          # 更新当餐卡路里累计
+          - service: input_number.set_value
+            target:
+              entity_id: !input meal_cal_entity
+            data:
+              value: "{{ (current_meal_cal + current_cal | float) | round(0) }}"
+
+          # 追加到记录（注意255字符限制，超过就截断）
+          - service: input_text.set_value
+            target:
+              entity_id: !input meal_log_entity
+            data:
+              value: "{% set new_entry = food_name ~ ' ' ~ current_weight | round(0) ~ 'g=' ~ current_cal ~ 'cal' %}{% if current_meal_log | length > 0 and current_meal_log != 'Empty' %}{{ (current_meal_log ~ ' | ' ~ new_entry)[:255] }}{% else %}{{ new_entry[:255] }}{% endif %}"
+
+          # 更新状态显示
+          - service: input_text.set_value
+            target:
+              entity_id: !input status_entity
+            data:
+              value: "➕ Added: {{ food_name }} {{ current_weight | round(0) }}g = {{ current_cal }} kcal | Meal: {{ (current_meal_cal + current_cal | float) | round(0) }} kcal"
+
+          # 🔊 Voice: Confirm add + smart warnings
+          - if:
+              - condition: template
+                value_template: "{{ tts_enabled and tts_speaker_entity not in ['', 'unknown', 'none', 'unavailable', None] }}"
+            then:
+              - action: tts.speak
+                target:
+                  entity_id: "{{ tts_engine_entity }}"
+                data:
+                  media_player_entity_id: "{{ tts_speaker_entity }}"
+                  message: >
+                    {% set new_meal_total = (current_meal_cal + current_cal | float) | round(0) %}
+                    {% set new_today_total = (current_today_cal + new_meal_total) | round(0) %}
+                    Added {{ food_name }}, {{ current_weight | round(0) }} grams, {{ current_cal }} calories.
+                    {% if cal_per_100g | float >= 400 %}
+                    Heads up, {{ food_name }} is {{ cal_per_100g | round(0) }} calories per 100 grams. That's a high calorie food.
+                    {% endif %}
+                    Meal total so far: {{ new_meal_total }} calories.
+                    {% if new_meal_total | float > meal_warning | float %}
+                    Warning: This meal is already {{ new_meal_total }} calories, which exceeds your {{ meal_warning }} calorie meal target.
+                    {% endif %}
+                continue_on_error: true
+
+          # 去皮归零（方便称下一种食物）
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ platform == 'z2m' }}"
+                sequence:
+                  - service: mqtt.publish
+                    data:
+                      topic: "zigbee2mqtt/{{ z2m_topic }}/set"
+                      payload: '{"reset_button": "RESET"}'
+
+          # 清空自定义输入
+          - service: input_text.set_value
+            target:
+              entity_id: !input custom_food_name
+            data:
+              value: ""
+          - service: input_number.set_value
+            target:
+              entity_id: !input custom_cal_entity
+            data:
+              value: 0
+
+      # ============================================================
+      # FINISH MEAL: 结束这餐，累加到今日总计 + 智能总结
+      # ============================================================
+      - conditions:
+          - condition: trigger
+            id: "finish"
+        sequence:
+          - variables:
+              new_today_total: "{{ (current_today_cal + current_meal_cal) | round(0) }}"
+              remaining: "{{ (daily_target | float - (current_today_cal + current_meal_cal)) | round(0) }}"
+
+          - service: input_number.set_value
+            target:
+              entity_id: !input today_cal_entity
+            data:
+              value: "{{ new_today_total }}"
+
+          - service: input_text.set_value
+            target:
+              entity_id: !input status_entity
+            data:
+              value: "✅ Meal done! {{ current_meal_cal | round(0) }} kcal added. Today's total: {{ new_today_total }} kcal"
+
+          # 🔊 Voice: Meal summary + daily budget + warnings (方案3)
+          - if:
+              - condition: template
+                value_template: "{{ tts_enabled and tts_speaker_entity not in ['', 'unknown', 'none', 'unavailable', None] }}"
+            then:
+              - action: tts.speak
+                target:
+                  entity_id: "{{ tts_engine_entity }}"
+                data:
+                  media_player_entity_id: "{{ tts_speaker_entity }}"
+                  message: >
+                    {% set meal_total = current_meal_cal | round(0) %}
+                    {% set today_total = (current_today_cal + current_meal_cal) | round(0) %}
+                    {% set remaining = (daily_target | float - today_total) | round(0) %}
+                    Meal complete! This meal was {{ meal_total }} calories.
+                    {% if current_meal_log != 'Empty' %}
+                    You had: {{ current_meal_log | replace(' | ', ', ') | replace('cal', ' calories') | truncate(200) }}.
+                    {% endif %}
+                    Today's total is now {{ today_total }} calories.
+                    {% if remaining > 0 %}
+                    You have {{ remaining }} calories remaining for today. 
+                    {% if remaining > 800 %}Good job keeping it balanced!{% elif remaining > 400 %}You're on track.{% else %}Consider lighter options for your next meal.{% endif %}
+                    {% else %}
+                    You have exceeded your daily target of {{ daily_target }} calories by {{ (remaining | abs) }} calories. Consider going for a walk!
+                    {% endif %}
+                continue_on_error: true
+
+          # 清空当餐记录
+          - service: input_number.set_value
+            target:
+              entity_id: !input meal_cal_entity
+            data:
+              value: 0
+          - service: input_text.set_value
+            target:
+              entity_id: !input meal_log_entity
+            data:
+              value: "Empty"
+
+      # ============================================================
+      # RESET TODAY: 重置今日总计
+      # ============================================================
+      - conditions:
+          - condition: trigger
+            id: "reset"
+        sequence:
+          - service: input_number.set_value
+            target:
+              entity_id: !input today_cal_entity
+            data:
+              value: 0
+          - service: input_number.set_value
+            target:
+              entity_id: !input meal_cal_entity
+            data:
+              value: 0
+          - service: input_text.set_value
+            target:
+              entity_id: !input meal_log_entity
+            data:
+              value: "Empty"
+          - service: input_text.set_value
+            target:
+              entity_id: !input status_entity
+            data:
+              value: "🗑️ Reset! Today's calories cleared. Ready to start fresh."
+
+          # 🔊 Voice: Reset confirmation
+          - if:
+              - condition: template
+                value_template: "{{ tts_enabled and tts_speaker_entity not in ['', 'unknown', 'none', 'unavailable', None] }}"
+            then:
+              - action: tts.speak
+                target:
+                  entity_id: "{{ tts_engine_entity }}"
+                data:
+                  media_player_entity_id: "{{ tts_speaker_entity }}"
+                  message: "Calories reset. Today's count is back to zero. Ready to start fresh!"
+                continue_on_error: true

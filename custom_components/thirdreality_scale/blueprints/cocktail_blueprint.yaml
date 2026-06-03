@@ -1,0 +1,680 @@
+blueprint:
+  name: "🍸 Cocktail Mixing Assistant"
+  description: >
+    Guide you step-by-step through mixing cocktails using your ThirdReality Smart Scale.
+    
+    **How it works:**
+    1. Select a cocktail from the dropdown on your dashboard
+    2. Press the "Start" button
+    3. Pour each ingredient — auto-advances when target weight is reached, or press "Done ✅" manually
+    
+    Supports up to 12 preset recipes + 1 custom recipe on the fly.
+    Works with both Zigbee2MQTT and ZHA. No phone needed.
+    
+    🔊 **Voice Support:** Optionally connect a ThirdReality HA Speaker (or any media_player)
+    to get voice guidance at each step!
+
+  domain: automation
+  author: "ThirdReality"
+  homeassistant:
+    min_version: "2024.1.0"
+
+  input:
+    # ==================== Platform & Device ====================
+    platform_type:
+      name: "🔌 Platform"
+      description: "Select your Zigbee platform."
+      default: "z2m"
+      selector:
+        select:
+          options:
+            - label: "Zigbee2MQTT"
+              value: "z2m"
+            - label: "ZHA"
+              value: "zha"
+
+    z2m_device_topic:
+      name: "📡 Z2M Device Topic (Z2M only)"
+      description: >
+        Zigbee2MQTT friendly_name or IEEE address of your scale.
+        Example: 0xaa97282c02b36898
+      default: ""
+      selector:
+        text:
+
+    zha_ieee_address:
+      name: "📡 ZHA IEEE Address (ZHA only)"
+      description: >
+        IEEE address of your scale in ZHA. Leave empty if using Z2M.
+      default: ""
+      selector:
+        text:
+
+    # ==================== Voice Announcements ====================
+    tts_enable:
+      name: "🔊 Enable Voice Announcements"
+      description: >
+        Enable TTS voice announcements through your smart speaker.
+      default: true
+      selector:
+        boolean:
+
+    tts_speaker:
+      name: "🔈 Speaker Entity"
+      description: >
+        The media_player entity for voice announcements.
+        For ThirdReality HA Speaker: media_player.3rspk_94bb43aa4ff9
+      default: {}
+      selector:
+        entity:
+          filter:
+            - domain: media_player
+
+    tts_service:
+      name: "🗣️ TTS Service"
+      description: >
+        The TTS service to use. Common options:
+        - tts.speak (for Assist/ESPHome speakers)
+        - tts.google_translate_say
+        - tts.cloud_say (Nabu Casa)
+      default: "tts.speak"
+      selector:
+        text:
+
+    tts_language:
+      name: "🌐 TTS Language"
+      description: >
+        Language for voice announcements.
+        Examples: en, zh-cn, de, fr
+      default: "en"
+      selector:
+        text:
+
+    # ==================== Controls ====================
+    recipe_selector:
+      name: "🍹 Cocktail Select Entity / 鸡尾酒选择实体"
+      description: >
+        The select entity from your scale that lets you choose a cocktail.
+        For Z2M: it's the "Select cocktail" entity (select.0xaa97282c02b36898_cocktail)
+        For ZHA: create an input_select helper with your recipe names.
+      selector:
+        entity:
+          filter:
+            - domain:
+                - select
+                - input_select
+
+    trigger_entity:
+      name: "🔘 Start Button / 开始按钮"
+      description: >
+        Press this to start making the selected cocktail.
+        Create in Helpers → Button, name it "Start Cocktail Making"
+      selector:
+        entity:
+          filter:
+            - domain: input_button
+
+    confirm_entity:
+      name: "✅ Done Button / 已完成按钮"
+      description: >
+        Press this after pouring each ingredient (or wait for auto-advance when target weight is reached).
+        Create in Helpers → Button, name it "Done"
+      selector:
+        entity:
+          filter:
+            - domain: input_button
+
+    scale_weight_sensor:
+      name: "⚖️ Scale Weight Sensor / 秤重量传感器"
+      description: >
+        The weight sensor from your scale. Used to auto-advance when target weight is reached.
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+
+    status_entity:
+      name: "📋 Status Display / 状态显示实体"
+      description: >
+        An input_text entity to show current step on the dashboard.
+        Create in Helpers → Text, name it "cocktail_status", max length 255.
+      selector:
+        entity:
+          filter:
+            - domain: input_text
+
+    recipe_list_entity:
+      name: "📜 Recipe List Display / 配料清单显示"
+      description: >
+        An input_text to show the full ingredient list on dashboard.
+        Create in Helpers → Text, name it "cocktail_recipe_list", max length 255.
+      selector:
+        entity:
+          filter:
+            - domain: input_text
+
+    step_entity:
+      name: "📄 Step Page Control / 页面步骤控制"
+      description: >
+        An input_select to control which page is shown on the dashboard.
+        Create in Helpers → Dropdown, options: idle, mixing, complete
+      selector:
+        entity:
+          filter:
+            - domain: input_select
+
+    # ==================== Recipes (format: name1:weight1,name2:weight2) ====================
+    recipe_1_name:
+      name: "🍸 Recipe 1 - Name"
+      description: "Must match a dropdown option exactly!"
+      default: "strawberry_daiquiri"
+      selector:
+        text:
+    recipe_1_ingredients:
+      name: "📝 Recipe 1 - Ingredients"
+      description: >
+        Format: name1:weight1,name2:weight2,...  (weight in grams)
+        Example: White Rum:45,Strawberry Puree:80,Lemon Juice:20,Simple Syrup:15
+      default: "White Rum:45,Fresh Strawberry Puree:80,Fresh Lemon Juice:20,Simple Syrup:15"
+      selector:
+        text:
+
+    recipe_2_name:
+      name: "🍸 Recipe 2 - Name"
+      default: "mojito"
+      selector:
+        text:
+    recipe_2_ingredients:
+      name: "📝 Recipe 2 - Ingredients"
+      default: "White Rum:40,Fresh Lime Juice:30,Fresh Mint Leaves:10,Simple Syrup:10,Club Soda:190"
+      selector:
+        text:
+
+    recipe_3_name:
+      name: "🍸 Recipe 3 - Name (leave empty to skip)"
+      default: ""
+      selector:
+        text:
+    recipe_3_ingredients:
+      name: "📝 Recipe 3 - Ingredients"
+      default: ""
+      selector:
+        text:
+
+    recipe_4_name:
+      name: "🍸 Recipe 4 - Name (leave empty to skip)"
+      default: ""
+      selector:
+        text:
+    recipe_4_ingredients:
+      name: "📝 Recipe 4 - Ingredients"
+      default: ""
+      selector:
+        text:
+
+    recipe_5_name:
+      name: "🍸 Recipe 5 - Name (leave empty to skip)"
+      default: ""
+      selector:
+        text:
+    recipe_5_ingredients:
+      name: "📝 Recipe 5 - Ingredients"
+      default: ""
+      selector:
+        text:
+
+    recipe_6_name:
+      name: "🍸 Recipe 6 - Name (leave empty to skip)"
+      default: ""
+      selector:
+        text:
+    recipe_6_ingredients:
+      name: "📝 Recipe 6 - Ingredients"
+      default: ""
+      selector:
+        text:
+
+    recipe_7_name:
+      name: "🍸 Recipe 7 - Name (leave empty to skip)"
+      default: ""
+      selector:
+        text:
+    recipe_7_ingredients:
+      name: "📝 Recipe 7 - Ingredients"
+      default: ""
+      selector:
+        text:
+
+    recipe_8_name:
+      name: "🍸 Recipe 8 - Name (leave empty to skip)"
+      default: ""
+      selector:
+        text:
+    recipe_8_ingredients:
+      name: "📝 Recipe 8 - Ingredients"
+      default: ""
+      selector:
+        text:
+
+    recipe_9_name:
+      name: "🍸 Recipe 9 - Name (leave empty to skip)"
+      default: ""
+      selector:
+        text:
+    recipe_9_ingredients:
+      name: "📝 Recipe 9 - Ingredients"
+      default: ""
+      selector:
+        text:
+
+    recipe_10_name:
+      name: "🍸 Recipe 10 - Name (leave empty to skip)"
+      default: ""
+      selector:
+        text:
+    recipe_10_ingredients:
+      name: "📝 Recipe 10 - Ingredients"
+      default: ""
+      selector:
+        text:
+
+    recipe_11_name:
+      name: "🍸 Recipe 11 - Name (leave empty to skip)"
+      default: ""
+      selector:
+        text:
+    recipe_11_ingredients:
+      name: "📝 Recipe 11 - Ingredients"
+      default: ""
+      selector:
+        text:
+
+    recipe_12_name:
+      name: "🍸 Recipe 12 - Name (leave empty to skip)"
+      default: ""
+      selector:
+        text:
+    recipe_12_ingredients:
+      name: "📝 Recipe 12 - Ingredients"
+      default: ""
+      selector:
+        text:
+
+    custom_recipe_entity:
+      name: "✏️ Custom Recipe Input"
+      description: >
+        An input_text where users can type a custom recipe on the fly.
+        Format: ingredient1:weight1,ingredient2:weight2,...
+        Select "custom" from the cocktail dropdown to use this.
+      default: {}
+      selector:
+        entity:
+          filter:
+            - domain: input_text
+
+mode: restart
+
+trigger:
+  - platform: state
+    entity_id: !input trigger_entity
+
+variables:
+  platform: !input platform_type
+  z2m_topic: !input z2m_device_topic
+  zha_ieee: !input zha_ieee_address
+  status_text: !input status_entity
+  selector_entity: !input recipe_selector
+  selected_recipe: "{{ states(selector_entity) }}"
+  tts_enabled: !input tts_enable
+  tts_speaker_entity: !input tts_speaker
+  tts_svc: !input tts_service
+  tts_lang: !input tts_language
+  weight_sensor: !input scale_weight_sensor
+  custom_recipe_ent: !input custom_recipe_entity
+  confirm_eid: !input confirm_entity
+  r1_name: !input recipe_1_name
+  r1_ing: !input recipe_1_ingredients
+  r2_name: !input recipe_2_name
+  r2_ing: !input recipe_2_ingredients
+  r3_name: !input recipe_3_name
+  r3_ing: !input recipe_3_ingredients
+  r4_name: !input recipe_4_name
+  r4_ing: !input recipe_4_ingredients
+  r5_name: !input recipe_5_name
+  r5_ing: !input recipe_5_ingredients
+  r6_name: !input recipe_6_name
+  r6_ing: !input recipe_6_ingredients
+  r7_name: !input recipe_7_name
+  r7_ing: !input recipe_7_ingredients
+  r8_name: !input recipe_8_name
+  r8_ing: !input recipe_8_ingredients
+  r9_name: !input recipe_9_name
+  r9_ing: !input recipe_9_ingredients
+  r10_name: !input recipe_10_name
+  r10_ing: !input recipe_10_ingredients
+  r11_name: !input recipe_11_name
+  r11_ing: !input recipe_11_ingredients
+  r12_name: !input recipe_12_name
+  r12_ing: !input recipe_12_ingredients
+  recipe_data: >
+    {% if selected_recipe == 'custom' %}{{ states(custom_recipe_ent) }}{% elif selected_recipe == r1_name %}{{ r1_ing }}{% elif selected_recipe == r2_name %}{{ r2_ing }}{% elif selected_recipe == r3_name %}{{ r3_ing }}{% elif selected_recipe == r4_name %}{{ r4_ing }}{% elif selected_recipe == r5_name %}{{ r5_ing }}{% elif selected_recipe == r6_name %}{{ r6_ing }}{% elif selected_recipe == r7_name %}{{ r7_ing }}{% elif selected_recipe == r8_name %}{{ r8_ing }}{% elif selected_recipe == r9_name %}{{ r9_ing }}{% elif selected_recipe == r10_name %}{{ r10_ing }}{% elif selected_recipe == r11_name %}{{ r11_ing }}{% elif selected_recipe == r12_name %}{{ r12_ing }}{% else %}{% endif %}
+  recipe: "{{ selected_recipe }}"
+  notif_id: "cocktail_mixing"
+  all_ingredients: >
+    {% set ns = namespace(items=[]) %}
+    {% if recipe_data | trim | length > 0 %}
+      {% for item in recipe_data.split(',') %}
+        {% set parts = item.split(':') %}
+        {% if parts | length == 2 and parts[1] | trim | int(0) > 0 %}
+          {% set ns.items = ns.items + [{'name': parts[0] | trim, 'weight': parts[1] | trim | int}] %}
+        {% endif %}
+      {% endfor %}
+    {% endif %}
+    {{ ns.items }}
+  total_steps: "{{ all_ingredients | length }}"
+
+action:
+  # ============================================================
+  # VALIDATE
+  # ============================================================
+  - if:
+      - condition: template
+        value_template: "{{ recipe_data | trim | length == 0 }}"
+    then:
+      - service: persistent_notification.create
+        data:
+          title: "❌ Recipe not found"
+          message: >
+            "{{ selected_recipe }}" is not configured in this automation.
+            Please select a valid cocktail from the dropdown.
+          notification_id: "{{ notif_id }}"
+      - stop: "Recipe not found"
+
+  - if:
+      - condition: template
+        value_template: "{{ total_steps | int == 0 }}"
+    then:
+      - service: persistent_notification.create
+        data:
+          title: "❌ Format error"
+          message: >
+            Cannot parse ingredients for "{{ recipe }}".
+            Check format: name1:weight1,name2:weight2
+          notification_id: "{{ notif_id }}"
+      - stop: "Parse error"
+
+  # ============================================================
+  # SETUP — switch to mixing page
+  # ============================================================
+  - service: input_select.select_option
+    target:
+      entity_id: !input step_entity
+    data:
+      option: "idle"
+
+  - delay:
+      milliseconds: 200
+
+  - service: input_select.select_option
+    target:
+      entity_id: !input step_entity
+    data:
+      option: "mixing"
+
+  # Write full ingredient list
+  - service: input_text.set_value
+    target:
+      entity_id: !input recipe_list_entity
+    data:
+      value: "{% for ing in all_ingredients %}{{ loop.index }}. {{ ing.name }} {{ ing.weight }}g{% if not loop.last %} | {% endif %}{% endfor %}"
+
+  - service: input_text.set_value
+    target:
+      entity_id: !input status_entity
+    data:
+      value: "🍸 {{ recipe }} | 📋 {{ total_steps }} ingredients | 🥃 Place glass on scale | Press Done ✅ to start!"
+
+  # 🔊 Voice: Starting（仅在音箱实体有效时才调用）
+  - if:
+      - condition: template
+        value_template: "{{ tts_enabled and tts_speaker_entity not in ['', 'unknown', 'none', 'unavailable', None] and states(tts_speaker_entity) not in ['unknown', 'unavailable', None] }}"
+    then:
+      - action: tts.speak
+        target:
+          entity_id: "{{ tts_speaker_entity }}"
+        data:
+          message: "Let's make a {{ recipe }}! There are {{ total_steps }} steps. Please place your glass on the scale, then press the Done button to begin."
+          language: "{{ tts_lang }}"
+        continue_on_error: true
+
+  # WAIT for Done button — 用户确认杯子已放好
+  - wait_for_trigger:
+      - platform: state
+        entity_id: !input confirm_entity
+    timeout:
+      minutes: 10
+    continue_on_timeout: false
+
+  - if:
+      - condition: template
+        value_template: "{{ wait.trigger is none }}"
+    then:
+      - service: persistent_notification.create
+        data:
+          title: "⏰ Timeout"
+          message: "Cancelled due to timeout."
+          notification_id: "{{ notif_id }}"
+      - stop: "Timeout"
+
+  # ============================================================
+  # START SCALE REPORTING
+  # ============================================================
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ platform == 'z2m' }}"
+        sequence:
+          - service: mqtt.publish
+            data:
+              topic: "zigbee2mqtt/{{ z2m_topic }}/set"
+              payload: '{"start_report_button": "START"}'
+    default:
+      - service: zha.issue_zigbee_cluster_command
+        data:
+          ieee: "{{ zha_ieee }}"
+          endpoint_id: 1
+          cluster_id: 0xFF0C
+          cluster_type: in
+          command: 1
+          command_type: server
+          args: []
+
+  - delay:
+      seconds: 1
+
+  # ============================================================
+  # INGREDIENT LOOP
+  # ============================================================
+  - repeat:
+      count: "{{ total_steps }}"
+      sequence:
+        - variables:
+            step: "{{ repeat.index }}"
+            ing_name: "{{ all_ingredients[repeat.index - 1].name }}"
+            ing_weight: "{{ all_ingredients[repeat.index - 1].weight }}"
+            target_weight: "{{ all_ingredients[repeat.index - 1].weight | float - 1 }}"
+
+        # TARE
+        - choose:
+            - conditions:
+                - condition: template
+                  value_template: "{{ platform == 'z2m' }}"
+              sequence:
+                - service: mqtt.publish
+                  data:
+                    topic: "zigbee2mqtt/{{ z2m_topic }}/set"
+                    payload: '{"reset_button": "RESET"}'
+          default:
+            - service: zha.issue_zigbee_cluster_command
+              data:
+                ieee: "{{ zha_ieee }}"
+                endpoint_id: 1
+                cluster_id: 0xFF0C
+                cluster_type: in
+                command: 0
+                command_type: server
+                args: []
+
+        - delay:
+            milliseconds: 800
+
+        # SET TARGET WEIGHT
+        - choose:
+            - conditions:
+                - condition: template
+                  value_template: "{{ platform == 'z2m' }}"
+              sequence:
+                - service: mqtt.publish
+                  data:
+                    topic: "zigbee2mqtt/{{ z2m_topic }}/set"
+                    payload: '{"set_weight_button": "{{ ing_weight }}"}'
+          default:
+            - service: zha.issue_zigbee_cluster_command
+              data:
+                ieee: "{{ zha_ieee }}"
+                endpoint_id: 1
+                cluster_id: 0xFF0C
+                cluster_type: in
+                command: 3
+                command_type: server
+                args: ["{{ ing_weight | int }}"]
+
+        # Update dashboard status
+        - service: input_text.set_value
+          target:
+            entity_id: !input status_entity
+          data:
+            value: "🍸 {{ recipe }} | Step {{ step }}/{{ total_steps }} | 👉 Add: {{ ing_name }} | 🎯 Target: {{ ing_weight }}g"
+
+        # 🔊 Voice: Current step（仅在音箱实体有效时才调用）
+        - if:
+            - condition: template
+              value_template: "{{ tts_enabled and tts_speaker_entity not in ['', 'unknown', 'none', 'unavailable', None] and states(tts_speaker_entity) not in ['unknown', 'unavailable', None] }}"
+          then:
+            - action: tts.speak
+              target:
+                entity_id: "{{ tts_speaker_entity }}"
+              data:
+                message: "Step {{ step }} of {{ total_steps }}. Please add {{ ing_weight }} grams of {{ ing_name }}."
+                language: "{{ tts_lang }}"
+              continue_on_error: true
+
+        # WAIT for Done button OR weight reached target（用户确认杯子后才启用自动跳转）
+        - wait_for_trigger:
+            - platform: state
+              entity_id: !input confirm_entity
+            - platform: template
+              value_template: >
+                {{ states(weight_sensor) | float(0) >= target_weight | float }}
+          timeout:
+            minutes: 10
+          continue_on_timeout: true
+
+        - if:
+            - condition: template
+              value_template: "{{ wait.trigger is none }}"
+          then:
+            - choose:
+                - conditions:
+                    - condition: template
+                      value_template: "{{ platform == 'z2m' }}"
+                  sequence:
+                    - service: mqtt.publish
+                      data:
+                        topic: "zigbee2mqtt/{{ z2m_topic }}/set"
+                        payload: '{"stop_report_button": "STOP"}'
+              default:
+                - service: zha.issue_zigbee_cluster_command
+                  data:
+                    ieee: "{{ zha_ieee }}"
+                    endpoint_id: 1
+                    cluster_id: 0xFF0C
+                    cluster_type: in
+                    command: 2
+                    command_type: server
+                    args: []
+            - service: persistent_notification.create
+              data:
+                title: "⏰ Timeout"
+                message: "Stopped due to timeout at step {{ step }}."
+                notification_id: "{{ notif_id }}"
+            - stop: "Timeout"
+
+        # Brief pause between steps
+        - delay:
+            seconds: 2
+
+  # ============================================================
+  # DONE! 🎉
+  # ============================================================
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ platform == 'z2m' }}"
+        sequence:
+          - service: mqtt.publish
+            data:
+              topic: "zigbee2mqtt/{{ z2m_topic }}/set"
+              payload: '{"stop_report_button": "STOP"}'
+    default:
+      - service: zha.issue_zigbee_cluster_command
+        data:
+          ieee: "{{ zha_ieee }}"
+          endpoint_id: 1
+          cluster_id: 0xFF0C
+          cluster_type: in
+          command: 2
+          command_type: server
+          args: []
+
+  # Switch to complete page
+  - service: input_select.select_option
+    target:
+      entity_id: !input step_entity
+    data:
+      option: "complete"
+
+  - service: input_text.set_value
+    target:
+      entity_id: !input status_entity
+    data:
+      value: "🎉 {{ recipe }} — All {{ total_steps }} ingredients done! Enjoy your cocktail! 🥂"
+
+  # 🔊 Voice: Complete（仅在音箱实体有效时才调用）
+  - if:
+      - condition: template
+        value_template: "{{ tts_enabled and tts_speaker_entity not in ['', 'unknown', 'none', 'unavailable', None] and states(tts_speaker_entity) not in ['unknown', 'unavailable', None] }}"
+    then:
+      - action: tts.speak
+        target:
+          entity_id: "{{ tts_speaker_entity }}"
+        data:
+          message: "Congratulations! Your {{ recipe }} is ready. All {{ total_steps }} ingredients have been added. Enjoy your cocktail! Cheers!"
+          language: "{{ tts_lang }}"
+        continue_on_error: true
+
+  # Auto-return to idle after 5s
+  - delay:
+      seconds: 5
+
+  - service: input_select.select_option
+    target:
+      entity_id: !input step_entity
+    data:
+      option: "idle"
+
+  - service: input_text.set_value
+    target:
+      entity_id: !input recipe_list_entity
+    data:
+      value: ""
