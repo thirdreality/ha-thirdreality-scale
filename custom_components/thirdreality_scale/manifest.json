@@ -1,0 +1,12 @@
+{
+  "domain": "thirdreality_scale",
+  "name": "ThirdReality Smart Scale",
+  "codeowners": ["@thirdreality"],
+  "config_flow": true,
+  "documentation": "https://github.com/thirdreality/ha-thirdreality-scale",
+  "integration_type": "device",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/thirdreality/ha-thirdreality-scale/issues",
+  "requirements": [],
+  "version": "1.0.0"
+}

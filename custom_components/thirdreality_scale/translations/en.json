@@ -1,0 +1,30 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Device Setup",
+        "description": "Configure your ThirdReality Smart Scale connection.",
+        "data": {
+          "platform": "Zigbee Platform",
+          "z2m_topic": "Z2M Device Topic (Zigbee2MQTT only)",
+          "zha_ieee": "ZHA IEEE Address (ZHA only)"
+        }
+      },
+      "features": {
+        "title": "Select Features",
+        "description": "Choose which features to enable for your scale.",
+        "data": {
+          "features": "Features"
+        }
+      },
+      "voice": {
+        "title": "Voice Announcements (Optional)",
+        "description": "Configure TTS for voice guidance. Leave empty to disable.",
+        "data": {
+          "tts_engine": "TTS Engine Entity (e.g. tts.piper)",
+          "tts_speaker": "Speaker Entity (e.g. media_player.xxx)"
+        }
+      }
+    }
+  }
+}
