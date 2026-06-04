@@ -73,8 +73,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Step 3: Set up all platforms (number, text, select, button)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # Step 4: Auto-install dashboards
-    await _install_dashboards(hass, entry, features)
+    # Step 4: Auto-install dashboards (delayed to ensure lovelace is ready)
+    hass.async_create_task(_install_dashboards(hass, entry, features))
 
     _LOGGER.info("ThirdReality Scale setup complete. Features: %s", features)
     return True
@@ -130,23 +130,26 @@ def _get_weight_sensor_entity(entry: ConfigEntry) -> str:
 async def _install_dashboards(
     hass: HomeAssistant, entry: ConfigEntry, features: list[str]
 ) -> None:
-    """Auto-install Lovelace dashboards by writing to .storage files."""
+    """Auto-install Lovelace dashboards using HA internal API."""
+    import asyncio
+    # Wait a bit for lovelace to fully initialize
+    await asyncio.sleep(5)
+
     try:
         weight_sensor = _get_weight_sensor_entity(entry)
         source_dir = Path(__file__).parent / "dashboards"
+
+        # Access lovelace data
+        lovelace_data = hass.data.get("lovelace")
+        if lovelace_data is None:
+            _LOGGER.warning("Lovelace not available for dashboard install")
+            return
 
         for feature, dash_config in DASHBOARDS.items():
             if feature not in features:
                 continue
 
             url_path = dash_config["url_path"]
-            storage_key = f"lovelace.{url_path}"
-            storage_path = Path(hass.config.path(".storage", storage_key))
-
-            # Skip if dashboard storage file already exists
-            if storage_path.exists():
-                _LOGGER.debug("Dashboard storage %s already exists, skipping", url_path)
-                continue
 
             # Read and process dashboard YAML template
             source_file = source_dir / dash_config["filename"]
@@ -161,7 +164,23 @@ async def _install_dashboards(
             if dashboard_config is None:
                 continue
 
-            # Write dashboard config to .storage file
+            # Try to find existing dashboard and save config to it
+            dashboards = getattr(lovelace_data, "dashboards", None)
+            if dashboards and url_path in dashboards:
+                dashboard = dashboards[url_path]
+                # Use the dashboard's async_save method
+                if hasattr(dashboard, "async_save"):
+                    await dashboard.async_save(dashboard_config)
+                    _LOGGER.info("Saved config to existing dashboard: %s", url_path)
+                    continue
+
+            # Dashboard doesn't exist yet - register it
+            # First register in lovelace_dashboards storage
+            await _register_dashboard_storage(hass, url_path, dash_config)
+
+            # Write the dashboard config storage file
+            storage_key = f"lovelace.{url_path}"
+            storage_path = Path(hass.config.path(".storage", storage_key))
             storage_data = {
                 "version": 1,
                 "minor_version": 1,
@@ -172,22 +191,21 @@ async def _install_dashboards(
                 _write_json, storage_path, storage_data
             )
 
-            # Register the dashboard in lovelace_dashboards storage
-            await _register_dashboard(hass, url_path, dash_config)
-
-            _LOGGER.info("Installed dashboard: %s (%s)", dash_config["title"], url_path)
+            _LOGGER.info(
+                "Installed dashboard: %s (restart HA to see it)",
+                dash_config["title"],
+            )
 
     except Exception as err:
         _LOGGER.warning("Dashboard auto-install failed (non-critical): %s", err)
 
 
-async def _register_dashboard(
+async def _register_dashboard_storage(
     hass: HomeAssistant, url_path: str, dash_config: dict
 ) -> None:
     """Register dashboard in the lovelace_dashboards storage file."""
     dashboards_storage_path = Path(hass.config.path(".storage", "lovelace_dashboards"))
 
-    # Read existing dashboards storage
     dashboards_data = await hass.async_add_executor_job(
         _read_json, dashboards_storage_path
     )
@@ -202,16 +220,13 @@ async def _register_dashboard(
 
     items = dashboards_data.get("data", {}).get("items", [])
 
-    # Check if already registered
     for item in items:
         if item.get("url_path") == url_path:
-            _LOGGER.debug("Dashboard %s already registered", url_path)
             return
 
-    # Add new dashboard entry
     import uuid
     new_item = {
-        "id": str(uuid.uuid4().hex[:12]),
+        "id": uuid.uuid4().hex[:12],
         "url_path": url_path,
         "title": dash_config["title"],
         "icon": dash_config["icon"],
@@ -222,7 +237,6 @@ async def _register_dashboard(
     items.append(new_item)
     dashboards_data["data"]["items"] = items
 
-    # Write back
     await hass.async_add_executor_job(
         _write_json, dashboards_storage_path, dashboards_data
     )
