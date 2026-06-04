@@ -1,6 +1,7 @@
 ﻿"""ThirdReality Smart Scale integration for Home Assistant."""
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 from pathlib import Path
@@ -129,9 +130,8 @@ def _get_weight_sensor_entity(entry: ConfigEntry) -> str:
 async def _install_dashboards(
     hass: HomeAssistant, entry: ConfigEntry, features: list[str]
 ) -> None:
-    """Auto-install Lovelace dashboards for enabled features."""
+    """Auto-install Lovelace dashboards by writing to .storage files."""
     try:
-        # Get the weight sensor entity for template replacement
         weight_sensor = _get_weight_sensor_entity(entry)
         source_dir = Path(__file__).parent / "dashboards"
 
@@ -140,74 +140,98 @@ async def _install_dashboards(
                 continue
 
             url_path = dash_config["url_path"]
+            storage_key = f"lovelace.{url_path}"
+            storage_path = Path(hass.config.path(".storage", storage_key))
 
-            # Check if dashboard already exists
-            dashboards = hass.data.get("lovelace", {}).get("dashboards", {})
-            if url_path in dashboards:
-                _LOGGER.debug("Dashboard %s already exists, skipping", url_path)
+            # Skip if dashboard storage file already exists
+            if storage_path.exists():
+                _LOGGER.debug("Dashboard storage %s already exists, skipping", url_path)
                 continue
 
-            # Read dashboard YAML template
+            # Read and process dashboard YAML template
             source_file = source_dir / dash_config["filename"]
             if not source_file.exists():
                 _LOGGER.warning("Dashboard file not found: %s", source_file)
                 continue
 
-            dashboard_yaml = await hass.async_add_executor_job(
+            dashboard_config = await hass.async_add_executor_job(
                 _read_and_process_dashboard, source_file, weight_sensor
             )
 
-            if dashboard_yaml is None:
+            if dashboard_config is None:
                 continue
 
-            # Create the dashboard using Lovelace storage
-            try:
-                await hass.services.async_call(
-                    "lovelace",
-                    "create_dashboard",
-                    {
-                        "url_path": url_path,
-                        "title": dash_config["title"],
-                        "icon": dash_config["icon"],
-                        "require_admin": False,
-                        "show_in_sidebar": True,
-                    },
-                    blocking=True,
-                )
-            except Exception:
-                # If create_dashboard service doesn't exist, use storage directly
-                _LOGGER.debug(
-                    "lovelace.create_dashboard not available, "
-                    "trying direct storage approach for %s",
-                    url_path,
-                )
-                await _create_dashboard_storage(hass, url_path, dash_config, dashboard_yaml)
-                continue
+            # Write dashboard config to .storage file
+            storage_data = {
+                "version": 1,
+                "minor_version": 1,
+                "key": storage_key,
+                "data": {"config": dashboard_config},
+            }
+            await hass.async_add_executor_job(
+                _write_json, storage_path, storage_data
+            )
 
-            # Save dashboard config
-            try:
-                await hass.services.async_call(
-                    "lovelace",
-                    "save_config",
-                    {
-                        "url_path": url_path,
-                        "config": dashboard_yaml,
-                    },
-                    blocking=True,
-                )
-                _LOGGER.info("Installed dashboard: %s", dash_config["title"])
-            except Exception as err:
-                _LOGGER.warning("Could not save dashboard config for %s: %s", url_path, err)
+            # Register the dashboard in lovelace_dashboards storage
+            await _register_dashboard(hass, url_path, dash_config)
+
+            _LOGGER.info("Installed dashboard: %s (%s)", dash_config["title"], url_path)
 
     except Exception as err:
         _LOGGER.warning("Dashboard auto-install failed (non-critical): %s", err)
+
+
+async def _register_dashboard(
+    hass: HomeAssistant, url_path: str, dash_config: dict
+) -> None:
+    """Register dashboard in the lovelace_dashboards storage file."""
+    dashboards_storage_path = Path(hass.config.path(".storage", "lovelace_dashboards"))
+
+    # Read existing dashboards storage
+    dashboards_data = await hass.async_add_executor_job(
+        _read_json, dashboards_storage_path
+    )
+
+    if dashboards_data is None:
+        dashboards_data = {
+            "version": 1,
+            "minor_version": 1,
+            "key": "lovelace_dashboards",
+            "data": {"items": []},
+        }
+
+    items = dashboards_data.get("data", {}).get("items", [])
+
+    # Check if already registered
+    for item in items:
+        if item.get("url_path") == url_path:
+            _LOGGER.debug("Dashboard %s already registered", url_path)
+            return
+
+    # Add new dashboard entry
+    import uuid
+    new_item = {
+        "id": str(uuid.uuid4().hex[:12]),
+        "url_path": url_path,
+        "title": dash_config["title"],
+        "icon": dash_config["icon"],
+        "show_in_sidebar": True,
+        "require_admin": False,
+        "mode": "storage",
+    }
+    items.append(new_item)
+    dashboards_data["data"]["items"] = items
+
+    # Write back
+    await hass.async_add_executor_job(
+        _write_json, dashboards_storage_path, dashboards_data
+    )
 
 
 def _read_and_process_dashboard(source_file: Path, weight_sensor: str) -> dict | None:
     """Read dashboard YAML and replace placeholders."""
     try:
         content = source_file.read_text(encoding="utf-8")
-        # Replace the weight sensor placeholder
         content = content.replace("WEIGHT_SENSOR_ENTITY", weight_sensor)
         return yaml.safe_load(content)
     except Exception as err:
@@ -215,59 +239,19 @@ def _read_and_process_dashboard(source_file: Path, weight_sensor: str) -> dict |
         return None
 
 
-async def _create_dashboard_storage(
-    hass: HomeAssistant, url_path: str, dash_config: dict, dashboard_yaml: dict
-) -> None:
-    """Create dashboard by writing directly to Lovelace storage."""
-    from homeassistant.components.lovelace import dashboard as lovelace_dashboard
-    from homeassistant.components.lovelace.const import (
-        CONF_ICON,
-        CONF_TITLE,
-        CONF_URL_PATH,
-        MODE_STORAGE,
-    )
-
+def _read_json(path: Path) -> dict | None:
+    """Read JSON file."""
+    if not path.exists():
+        return None
     try:
-        lovelace_config = hass.data.get("lovelace")
-        if lovelace_config is None:
-            _LOGGER.warning("Lovelace component not loaded")
-            return
-
-        # Register the new dashboard
-        config = {
-            CONF_URL_PATH: url_path,
-            CONF_TITLE: dash_config["title"],
-            CONF_ICON: dash_config["icon"],
-            "show_in_sidebar": True,
-            "require_admin": False,
-            "mode": MODE_STORAGE,
-        }
-
-        if hasattr(lovelace_config, "async_create_dashboard"):
-            await lovelace_config.async_create_dashboard(config)
-        elif "dashboards" in lovelace_config:
-            # Fallback: write to .storage file directly
-            storage_path = Path(hass.config.path(
-                ".storage", f"lovelace.{url_path}"
-            ))
-            storage_data = {
-                "version": 1,
-                "minor_version": 1,
-                "key": f"lovelace.{url_path}",
-                "data": {"config": dashboard_yaml},
-            }
-            import json
-            await hass.async_add_executor_job(
-                _write_json, storage_path, storage_data
-            )
-            _LOGGER.info("Installed dashboard via storage: %s", dash_config["title"])
-    except Exception as err:
-        _LOGGER.warning("Failed to create dashboard %s: %s", url_path, err)
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
 
 
 def _write_json(path: Path, data: dict) -> None:
     """Write JSON data to file."""
-    import json
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
