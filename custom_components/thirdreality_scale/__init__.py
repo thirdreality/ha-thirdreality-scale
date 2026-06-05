@@ -73,7 +73,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Step 3: Set up all platforms (number, text, select, button)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # Step 4: Auto-install dashboards (delayed to ensure lovelace is ready)
+    # Step 4: Auto-install dashboards (delayed)
     hass.async_create_task(_install_dashboards(hass, entry, features))
 
     _LOGGER.info("ThirdReality Scale setup complete. Features: %s", features)
@@ -130,20 +130,14 @@ def _get_weight_sensor_entity(entry: ConfigEntry) -> str:
 async def _install_dashboards(
     hass: HomeAssistant, entry: ConfigEntry, features: list[str]
 ) -> None:
-    """Auto-install Lovelace dashboards using HA internal API."""
+    """Auto-install Lovelace dashboards using WebSocket API."""
     import asyncio
-    # Wait a bit for lovelace to fully initialize
-    await asyncio.sleep(5)
+    # Wait for HA to fully start and lovelace to be ready
+    await asyncio.sleep(10)
 
     try:
         weight_sensor = _get_weight_sensor_entity(entry)
         source_dir = Path(__file__).parent / "dashboards"
-
-        # Access lovelace data
-        lovelace_data = hass.data.get("lovelace")
-        if lovelace_data is None:
-            _LOGGER.warning("Lovelace not available for dashboard install")
-            return
 
         for feature, dash_config in DASHBOARDS.items():
             if feature not in features:
@@ -164,82 +158,98 @@ async def _install_dashboards(
             if dashboard_config is None:
                 continue
 
-            # Try to find existing dashboard and save config to it
-            dashboards = getattr(lovelace_data, "dashboards", None)
-            if dashboards and url_path in dashboards:
-                dashboard = dashboards[url_path]
-                # Use the dashboard's async_save method
-                if hasattr(dashboard, "async_save"):
-                    await dashboard.async_save(dashboard_config)
-                    _LOGGER.info("Saved config to existing dashboard: %s", url_path)
-                    continue
+            # Check if dashboard already exists in lovelace
+            lovelace_data = hass.data.get("lovelace")
+            if lovelace_data is not None:
+                dashboards = getattr(lovelace_data, "dashboards", {})
+                if url_path in dashboards:
+                    # Dashboard exists - save config to it
+                    dashboard = dashboards[url_path]
+                    if hasattr(dashboard, "async_save"):
+                        await dashboard.async_save(dashboard_config)
+                        _LOGGER.info("Updated existing dashboard: %s", url_path)
+                        continue
+                    else:
+                        _LOGGER.debug("Dashboard %s exists but no async_save", url_path)
+                        continue
 
-            # Dashboard doesn't exist yet - register it
-            # First register in lovelace_dashboards storage
-            await _register_dashboard_storage(hass, url_path, dash_config)
-
-            # Write the dashboard config storage file
-            storage_key = f"lovelace.{url_path}"
-            storage_path = Path(hass.config.path(".storage", storage_key))
-            storage_data = {
-                "version": 1,
-                "minor_version": 1,
-                "key": storage_key,
-                "data": {"config": dashboard_config},
-            }
-            await hass.async_add_executor_job(
-                _write_json, storage_path, storage_data
-            )
-
-            _LOGGER.info(
-                "Installed dashboard: %s (restart HA to see it)",
-                dash_config["title"],
-            )
+            # Dashboard doesn't exist - create it via WebSocket API
+            await _create_dashboard_via_ws(hass, url_path, dash_config, dashboard_config)
 
     except Exception as err:
         _LOGGER.warning("Dashboard auto-install failed (non-critical): %s", err)
 
 
-async def _register_dashboard_storage(
-    hass: HomeAssistant, url_path: str, dash_config: dict
+async def _create_dashboard_via_ws(
+    hass: HomeAssistant, url_path: str, dash_config: dict, dashboard_config: dict
 ) -> None:
-    """Register dashboard in the lovelace_dashboards storage file."""
-    dashboards_storage_path = Path(hass.config.path(".storage", "lovelace_dashboards"))
+    """Create a new dashboard using the lovelace WebSocket collection."""
+    try:
+        from homeassistant.components.lovelace import dashboard as lv_dashboard
 
-    dashboards_data = await hass.async_add_executor_job(
-        _read_json, dashboards_storage_path
-    )
-
-    if dashboards_data is None:
-        dashboards_data = {
-            "version": 1,
-            "minor_version": 1,
-            "key": "lovelace_dashboards",
-            "data": {"items": []},
-        }
-
-    items = dashboards_data.get("data", {}).get("items", [])
-
-    for item in items:
-        if item.get("url_path") == url_path:
+        lovelace_data = hass.data.get("lovelace")
+        if lovelace_data is None:
+            _LOGGER.warning("Lovelace not loaded, cannot create dashboard")
             return
 
-    import uuid
-    new_item = {
-        "id": uuid.uuid4().hex[:12],
-        "url_path": url_path,
-        "title": dash_config["title"],
-        "icon": dash_config["icon"],
-        "show_in_sidebar": True,
-        "require_admin": False,
-        "mode": "storage",
-    }
-    items.append(new_item)
-    dashboards_data["data"]["items"] = items
+        # Use the dashboards collection to create a new dashboard
+        dashboards_collection = getattr(lovelace_data, "dashboards_collection", None)
+        if dashboards_collection is None:
+            _LOGGER.warning("No dashboards_collection found in lovelace data")
+            # Fallback: try to access via different attribute names
+            for attr_name in dir(lovelace_data):
+                obj = getattr(lovelace_data, attr_name, None)
+                if obj and hasattr(obj, "async_create_item"):
+                    dashboards_collection = obj
+                    _LOGGER.debug("Found collection via attr: %s", attr_name)
+                    break
 
-    await hass.async_add_executor_job(
-        _write_json, dashboards_storage_path, dashboards_data
-    )
+        if dashboards_collection and hasattr(dashboards_collection, "async_create_item"):
+            # Create the dashboard entry
+            await dashboards_collection.async_create_item({
+                "url_path": url_path,
+                "title": dash_config["title"],
+                "icon": dash_config["icon"],
+                "show_in_sidebar": True,
+                "require_admin": False,
+                "mode": "storage",
+            })
+            _LOGGER.info("Created dashboard via collection: %s", url_path)
+
+            # Wait for HA to register the new dashboard
+            import asyncio
+            await asyncio.sleep(2)
+
+            # Now save the config to the newly created dashboard
+            lovelace_data = hass.data.get("lovelace")
+            dashboards = getattr(lovelace_data, "dashboards", {})
+            if url_path in dashboards:
+                dashboard = dashboards[url_path]
+                if hasattr(dashboard, "async_save"):
+                    await dashboard.async_save(dashboard_config)
+                    _LOGGER.info("Saved config to new dashboard: %s", url_path)
+            else:
+                # Write config file directly as fallback
+                storage_key = f"lovelace.{url_path}"
+                storage_path = Path(hass.config.path(".storage", storage_key))
+                storage_data = {
+                    "version": 1,
+                    "minor_version": 1,
+                    "key": storage_key,
+                    "data": {"config": dashboard_config},
+                }
+                await hass.async_add_executor_job(_write_json, storage_path, storage_data)
+                _LOGGER.info("Wrote config file for dashboard: %s", url_path)
+        else:
+            _LOGGER.warning(
+                "Cannot create dashboard %s: no suitable API found. "
+                "Available lovelace attrs: %s",
+                url_path,
+                [a for a in dir(lovelace_data) if not a.startswith("_")],
+            )
+
+    except Exception as err:
+        _LOGGER.warning("Failed to create dashboard %s: %s", url_path, err)
 
 
 def _read_and_process_dashboard(source_file: Path, weight_sensor: str) -> dict | None:
@@ -250,17 +260,6 @@ def _read_and_process_dashboard(source_file: Path, weight_sensor: str) -> dict |
         return yaml.safe_load(content)
     except Exception as err:
         _LOGGER.warning("Failed to read dashboard %s: %s", source_file, err)
-        return None
-
-
-def _read_json(path: Path) -> dict | None:
-    """Read JSON file."""
-    if not path.exists():
-        return None
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
         return None
 
 
