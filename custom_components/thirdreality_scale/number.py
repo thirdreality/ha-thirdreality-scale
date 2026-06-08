@@ -77,9 +77,9 @@ async def async_setup_entry(
                 icon="mdi:target",
                 native_min_value=500,
                 native_max_value=5000,
-                native_step=100,
+                native_step=1,
                 initial_value=DEFAULT_DAILY_TARGET,
-                mode=NumberMode.SLIDER,
+                mode=NumberMode.BOX,
                 unit="kcal",
             ),
             ScaleNumber(
@@ -89,9 +89,9 @@ async def async_setup_entry(
                 icon="mdi:alert",
                 native_min_value=200,
                 native_max_value=3000,
-                native_step=100,
+                native_step=1,
                 initial_value=DEFAULT_MEAL_WARNING,
-                mode=NumberMode.SLIDER,
+                mode=NumberMode.BOX,
                 unit="kcal",
             ),
         ])

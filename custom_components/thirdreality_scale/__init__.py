@@ -9,6 +9,7 @@ from pathlib import Path
 import yaml
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 
@@ -73,8 +74,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Step 3: Set up all platforms (number, text, select, button)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # Step 4: Auto-install dashboards (delayed)
-    hass.async_create_task(_install_dashboards(hass, entry, features))
+    # Step 4: Auto-create automations based on blueprints
+    await hass.async_add_executor_job(
+        _install_automations, hass, entry, features
+    )
+
+    # Step 5: Auto-install dashboards
+    # Write storage files immediately, then register after HA is fully started
+    await hass.async_add_executor_job(
+        _install_dashboards_storage, hass, entry, features
+    )
+
+    # Register dashboards in lovelace after HA is fully started
+    async def _register_dashboards_when_ready(event=None):
+        """Register dashboards after HA has fully started."""
+        await _register_dashboards_in_lovelace(hass, entry, features)
+
+    if hass.is_running:
+        # HA already running (e.g., config entry added via UI after boot)
+        hass.async_create_task(_register_dashboards_when_ready())
+    else:
+        # HA still starting up - wait for full start
+        hass.bus.async_listen_once(
+            EVENT_HOMEASSISTANT_STARTED, _register_dashboards_when_ready
+        )
 
     _LOGGER.info("ThirdReality Scale setup complete. Features: %s", features)
     return True
@@ -127,17 +150,165 @@ def _get_weight_sensor_entity(entry: ConfigEntry) -> str:
     return "sensor.REPLACE_WITH_YOUR_SCALE_WEIGHT_SENSOR"
 
 
-async def _install_dashboards(
+def _install_automations(
     hass: HomeAssistant, entry: ConfigEntry, features: list[str]
 ) -> None:
-    """Auto-install Lovelace dashboards using WebSocket API."""
-    import asyncio
-    # Wait for HA to fully start and lovelace to be ready
-    await asyncio.sleep(10)
+    """Auto-create automations based on installed blueprints.
 
+    Appends blueprint-based automations to automations.yaml file,
+    which is the standard HA automation configuration file.
+    """
+    from .const import CONF_TTS_SPEAKER, CONF_TTS_ENGINE, DEFAULT_TTS_ENGINE
+
+    try:
+        data = entry.data
+        platform = data.get(CONF_PLATFORM, PLATFORM_Z2M)
+        z2m_topic = data.get(CONF_Z2M_TOPIC, "")
+        zha_ieee = data.get(CONF_ZHA_IEEE, "")
+        tts_speaker = data.get(CONF_TTS_SPEAKER, "")
+        tts_engine = data.get(CONF_TTS_ENGINE, DEFAULT_TTS_ENGINE)
+        weight_sensor = _get_weight_sensor_entity(entry)
+
+        # Entity ID prefix: based on how HA names entities from this integration
+        prefix = "thirdreality_smart_scale"
+
+        # Read existing automations.yaml
+        automations_yaml_path = Path(hass.config.path("automations.yaml"))
+        existing_automations = []
+
+        if automations_yaml_path.exists():
+            try:
+                content = automations_yaml_path.read_text(encoding="utf-8")
+                if content.strip():
+                    loaded = yaml.safe_load(content)
+                    if isinstance(loaded, list):
+                        existing_automations = loaded
+            except Exception as err:
+                _LOGGER.warning("Failed to read automations.yaml: %s", err)
+
+        # Check which automations already exist (by id or alias)
+        existing_ids = {a.get("id") for a in existing_automations if isinstance(a, dict)}
+        existing_aliases = {a.get("alias") for a in existing_automations if isinstance(a, dict)}
+        new_automations = []
+
+        # Calorie automation
+        if FEATURE_CALORIE in features:
+            auto_id = f"{DOMAIN}_calorie"
+            calorie_alias = "🔥 Calorie Tracker (ThirdReality Scale)"
+            if auto_id not in existing_ids and calorie_alias not in existing_aliases:
+                calorie_automation = {
+                    "id": auto_id,
+                    "alias": "🔥 Calorie Tracker (ThirdReality Scale)",
+                    "use_blueprint": {
+                        "path": f"{BLUEPRINT_DIR}/calorie_blueprint.yaml",
+                        "input": {
+                            "platform_type": platform,
+                            "z2m_device_topic": z2m_topic,
+                            "zha_ieee_address": zha_ieee,
+                            "tts_enable": bool(tts_speaker),
+                            "tts_speaker": tts_speaker if tts_speaker else {},
+                            "tts_engine": tts_engine,
+                            "daily_calorie_target": 2000,
+                            "meal_calorie_warning": 800,
+                            "food_selector": f"select.{prefix}_food_preset",
+                            "weight_sensor": weight_sensor,
+                            "custom_food_name": f"text.{prefix}_custom_food_name",
+                            "custom_cal_entity": f"number.{prefix}_custom_cal_per_100g",
+                            "add_button": f"button.{prefix}_add_food",
+                            "finish_meal_button": f"button.{prefix}_finish_meal",
+                            "reset_today_button": f"button.{prefix}_reset_today",
+                            "meal_cal_entity": f"number.{prefix}_meal_calories",
+                            "today_cal_entity": f"number.{prefix}_today_calories",
+                            "status_entity": f"text.{prefix}_calorie_status",
+                            "meal_log_entity": f"text.{prefix}_meal_log",
+                        },
+                    },
+                }
+                new_automations.append(calorie_automation)
+                _LOGGER.info("Adding calorie automation: %s", auto_id)
+
+        # Cocktail automation
+        if FEATURE_COCKTAIL in features:
+            auto_id = f"{DOMAIN}_cocktail"
+            cocktail_alias = "🍸 Cocktail Mixing Assistant (ThirdReality Scale)"
+            if auto_id not in existing_ids and cocktail_alias not in existing_aliases:
+                cocktail_automation = {
+                    "id": auto_id,
+                    "alias": "🍸 Cocktail Mixing Assistant (ThirdReality Scale)",
+                    "use_blueprint": {
+                        "path": f"{BLUEPRINT_DIR}/cocktail_blueprint.yaml",
+                        "input": {
+                            "platform_type": platform,
+                            "z2m_device_topic": z2m_topic,
+                            "zha_ieee_address": zha_ieee,
+                            "tts_enable": bool(tts_speaker),
+                            "tts_speaker": tts_speaker if tts_speaker else {},
+                            "tts_engine": tts_engine,
+                            "recipe_selector": f"select.{prefix}_select_cocktail",
+                            "trigger_entity": f"button.{prefix}_start_cocktail",
+                            "confirm_entity": f"button.{prefix}_done",
+                            "scale_weight_sensor": weight_sensor,
+                            "status_entity": f"text.{prefix}_cocktail_status",
+                            "recipe_list_entity": f"text.{prefix}_cocktail_recipe_list",
+                            "step_entity": f"select.{prefix}_cocktail_step",
+                            "custom_recipe_entity": f"text.{prefix}_custom_recipe",
+                        },
+                    },
+                }
+                new_automations.append(cocktail_automation)
+                _LOGGER.info("Adding cocktail automation: %s", auto_id)
+
+        # Write updated automations.yaml if we added any
+        if new_automations:
+            all_automations = existing_automations + new_automations
+            yaml_content = yaml.dump(
+                all_automations,
+                default_flow_style=False,
+                allow_unicode=True,
+                sort_keys=False,
+            )
+            automations_yaml_path.write_text(yaml_content, encoding="utf-8")
+            _LOGGER.info(
+                "Installed %d automation(s) to automations.yaml",
+                len(new_automations),
+            )
+        else:
+            _LOGGER.debug("No new automations to install (already exist)")
+
+    except Exception as err:
+        _LOGGER.warning(
+            "Automation auto-install failed (non-critical): %s", err
+        )
+
+
+def _install_dashboards_storage(
+    hass: HomeAssistant, entry: ConfigEntry, features: list[str]
+) -> None:
+    """Write dashboard storage files directly to .storage directory.
+
+    This is the most reliable method - it writes the dashboard registry
+    and config files that HA reads on startup. Works across all HA versions.
+    """
     try:
         weight_sensor = _get_weight_sensor_entity(entry)
         source_dir = Path(__file__).parent / "dashboards"
+        storage_dir = Path(hass.config.path(".storage"))
+        storage_dir.mkdir(parents=True, exist_ok=True)
+
+        # Read existing lovelace_dashboards registry
+        dashboards_registry_path = storage_dir / "lovelace_dashboards"
+        existing_dashboards = {}
+        if dashboards_registry_path.exists():
+            try:
+                with open(dashboards_registry_path, "r", encoding="utf-8") as f:
+                    registry_data = json.load(f)
+                    items = registry_data.get("data", {}).get("items", [])
+                    for item in items:
+                        existing_dashboards[item.get("url_path")] = item
+            except (json.JSONDecodeError, KeyError) as err:
+                _LOGGER.warning("Failed to read dashboard registry: %s", err)
+
+        new_items_added = False
 
         for feature, dash_config in DASHBOARDS.items():
             if feature not in features:
@@ -145,111 +316,136 @@ async def _install_dashboards(
 
             url_path = dash_config["url_path"]
 
-            # Read and process dashboard YAML template
+            # Skip if dashboard already registered
+            if url_path in existing_dashboards:
+                _LOGGER.debug("Dashboard already registered: %s", url_path)
+            else:
+                # Add to registry
+                existing_dashboards[url_path] = {
+                    "icon": dash_config["icon"],
+                    "id": url_path,
+                    "mode": "storage",
+                    "require_admin": False,
+                    "show_in_sidebar": True,
+                    "title": dash_config["title"],
+                    "url_path": url_path,
+                }
+                new_items_added = True
+                _LOGGER.info("Adding dashboard to registry: %s", url_path)
+
+            # Write dashboard config storage file
             source_file = source_dir / dash_config["filename"]
             if not source_file.exists():
-                _LOGGER.warning("Dashboard file not found: %s", source_file)
+                _LOGGER.warning("Dashboard source file not found: %s", source_file)
                 continue
 
-            dashboard_config = await hass.async_add_executor_job(
-                _read_and_process_dashboard, source_file, weight_sensor
-            )
-
+            dashboard_config = _read_and_process_dashboard(source_file, weight_sensor)
             if dashboard_config is None:
                 continue
 
-            # Check if dashboard already exists in lovelace
-            lovelace_data = hass.data.get("lovelace")
-            if lovelace_data is not None:
-                dashboards = getattr(lovelace_data, "dashboards", {})
-                if url_path in dashboards:
-                    # Dashboard exists - save config to it
-                    dashboard = dashboards[url_path]
-                    if hasattr(dashboard, "async_save"):
-                        await dashboard.async_save(dashboard_config)
-                        _LOGGER.info("Updated existing dashboard: %s", url_path)
-                        continue
-                    else:
-                        _LOGGER.debug("Dashboard %s exists but no async_save", url_path)
-                        continue
+            # Write the lovelace config for this dashboard
+            config_storage_key = f"lovelace.{url_path}"
+            config_storage_path = storage_dir / config_storage_key
+            config_storage_data = {
+                "version": 1,
+                "minor_version": 1,
+                "key": config_storage_key,
+                "data": {"config": dashboard_config},
+            }
+            _write_json(config_storage_path, config_storage_data)
+            _LOGGER.info("Wrote dashboard config: %s", config_storage_key)
 
-            # Dashboard doesn't exist - create it via WebSocket API
-            await _create_dashboard_via_ws(hass, url_path, dash_config, dashboard_config)
+        # Write updated registry if we added new items
+        if new_items_added:
+            registry_data = {
+                "version": 1,
+                "minor_version": 1,
+                "key": "lovelace_dashboards",
+                "data": {
+                    "items": list(existing_dashboards.values())
+                },
+            }
+            _write_json(dashboards_registry_path, registry_data)
+            _LOGGER.info("Updated lovelace_dashboards registry")
 
     except Exception as err:
-        _LOGGER.warning("Dashboard auto-install failed (non-critical): %s", err)
+        _LOGGER.warning(
+            "Dashboard storage install failed (non-critical): %s", err
+        )
 
 
-async def _create_dashboard_via_ws(
-    hass: HomeAssistant, url_path: str, dash_config: dict, dashboard_config: dict
+async def _register_dashboards_in_lovelace(
+    hass: HomeAssistant, entry: ConfigEntry, features: list[str]
 ) -> None:
-    """Create a new dashboard using the lovelace WebSocket collection."""
+    """Register dashboards in the running lovelace system.
+
+    This handles the case where HA is already running (e.g., integration
+    added via UI). The storage files are already written, so we just need
+    to notify lovelace to pick them up.
+    """
+    import asyncio
+
     try:
-        from homeassistant.components.lovelace import dashboard as lv_dashboard
+        # Small delay to ensure lovelace component is fully loaded
+        await asyncio.sleep(3)
 
         lovelace_data = hass.data.get("lovelace")
         if lovelace_data is None:
-            _LOGGER.warning("Lovelace not loaded, cannot create dashboard")
+            _LOGGER.debug(
+                "Lovelace data not available. Dashboards will appear after restart."
+            )
             return
 
-        # Use the dashboards collection to create a new dashboard
-        dashboards_collection = getattr(lovelace_data, "dashboards_collection", None)
-        if dashboards_collection is None:
-            _LOGGER.warning("No dashboards_collection found in lovelace data")
-            # Fallback: try to access via different attribute names
-            for attr_name in dir(lovelace_data):
-                obj = getattr(lovelace_data, attr_name, None)
-                if obj and hasattr(obj, "async_create_item"):
-                    dashboards_collection = obj
-                    _LOGGER.debug("Found collection via attr: %s", attr_name)
-                    break
+        for feature, dash_config in DASHBOARDS.items():
+            if feature not in features:
+                continue
 
-        if dashboards_collection and hasattr(dashboards_collection, "async_create_item"):
-            # Create the dashboard entry
-            await dashboards_collection.async_create_item({
-                "url_path": url_path,
-                "title": dash_config["title"],
-                "icon": dash_config["icon"],
-                "show_in_sidebar": True,
-                "require_admin": False,
-                "mode": "storage",
-            })
-            _LOGGER.info("Created dashboard via collection: %s", url_path)
+            url_path = dash_config["url_path"]
 
-            # Wait for HA to register the new dashboard
-            import asyncio
-            await asyncio.sleep(2)
-
-            # Now save the config to the newly created dashboard
-            lovelace_data = hass.data.get("lovelace")
+            # Check if already registered in running system
             dashboards = getattr(lovelace_data, "dashboards", {})
             if url_path in dashboards:
-                dashboard = dashboards[url_path]
-                if hasattr(dashboard, "async_save"):
-                    await dashboard.async_save(dashboard_config)
-                    _LOGGER.info("Saved config to new dashboard: %s", url_path)
-            else:
-                # Write config file directly as fallback
-                storage_key = f"lovelace.{url_path}"
-                storage_path = Path(hass.config.path(".storage", storage_key))
-                storage_data = {
-                    "version": 1,
-                    "minor_version": 1,
-                    "key": storage_key,
-                    "data": {"config": dashboard_config},
-                }
-                await hass.async_add_executor_job(_write_json, storage_path, storage_data)
-                _LOGGER.info("Wrote config file for dashboard: %s", url_path)
-        else:
-            _LOGGER.warning(
-                "Cannot create dashboard %s: no suitable API found. "
-                "Available lovelace attrs: %s",
-                url_path,
-                [a for a in dir(lovelace_data) if not a.startswith("_")],
-            )
+                _LOGGER.debug("Dashboard already active: %s", url_path)
+                continue
+
+            # Try to create via collection API (works on HA 2024.x+)
+            created = False
+            # Try different attribute names for the collection
+            for attr_name in ("dashboards_collection", "_dashboards_collection"):
+                collection = getattr(lovelace_data, attr_name, None)
+                if collection and hasattr(collection, "async_create_item"):
+                    try:
+                        await collection.async_create_item({
+                            "url_path": url_path,
+                            "title": dash_config["title"],
+                            "icon": dash_config["icon"],
+                            "show_in_sidebar": True,
+                            "require_admin": False,
+                            "mode": "storage",
+                        })
+                        created = True
+                        _LOGGER.info(
+                            "Registered dashboard in lovelace: %s", url_path
+                        )
+                        break
+                    except Exception as err:
+                        _LOGGER.debug(
+                            "Collection API failed for %s: %s", url_path, err
+                        )
+
+            if not created:
+                _LOGGER.info(
+                    "Dashboard %s written to storage. "
+                    "It will appear after Home Assistant restart.",
+                    url_path,
+                )
 
     except Exception as err:
-        _LOGGER.warning("Failed to create dashboard %s: %s", url_path, err)
+        _LOGGER.debug(
+            "Live dashboard registration skipped: %s. "
+            "Dashboards will appear after restart.",
+            err,
+        )
 
 
 def _read_and_process_dashboard(source_file: Path, weight_sensor: str) -> dict | None:

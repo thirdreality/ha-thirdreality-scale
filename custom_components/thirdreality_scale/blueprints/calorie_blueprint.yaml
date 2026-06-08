@@ -127,11 +127,12 @@ blueprint:
     food_selector:
       name: "🍎 Food Preset Selector / 预设食物下拉框"
       description: >
-        An input_select with food names matching the preset list below.
-        / 预设食物下拉框，选项需与下方食物数据库名称一致。
+        The food preset select entity.
+        Use: select.thirdreality_smart_scale_food_preset
       selector:
         entity:
           filter:
+            - domain: select
             - domain: input_select
 
     weight_sensor:
@@ -147,77 +148,100 @@ blueprint:
     custom_food_name:
       name: "✏️ Custom Food Name Entity / 自定义食物名称"
       description: >
-        An input_text for users to enter custom food name.
-        / 用户输入自定义食物名称的 input_text。
+        Text entity for custom food name.
+        Use: text.thirdreality_smart_scale_custom_food_name
       selector:
         entity:
           filter:
+            - domain: text
             - domain: input_text
 
     custom_cal_entity:
       name: "✏️ Custom Cal/100g Entity / 自定义卡路里值"
       description: >
-        An input_number for users to enter custom calories per 100g.
-        / 用户输入每100g卡路里值的 input_number。
+        Number entity for custom calories per 100g.
+        Use: number.thirdreality_smart_scale_custom_cal_per_100g
       selector:
         entity:
           filter:
+            - domain: number
             - domain: input_number
 
     add_button:
       name: "➕ Add Button / 添加按钮"
-      description: "Press to add current food to meal log."
+      description: >
+        Press to add current food to meal log.
+        Use: button.thirdreality_smart_scale_add_food
       selector:
         entity:
           filter:
+            - domain: button
             - domain: input_button
 
     finish_meal_button:
       name: "✅ Finish Meal Button / 结束这餐按钮"
-      description: "Press to finish current meal and add to today's total."
+      description: >
+        Press to finish current meal and add to today's total.
+        Use: button.thirdreality_smart_scale_finish_meal
       selector:
         entity:
           filter:
+            - domain: button
             - domain: input_button
 
     reset_today_button:
       name: "🗑️ Reset Today Button / 重置今日按钮"
-      description: "Press to reset today's total calories."
+      description: >
+        Press to reset today's total calories.
+        Use: button.thirdreality_smart_scale_reset_today
       selector:
         entity:
           filter:
+            - domain: button
             - domain: input_button
 
     meal_cal_entity:
       name: "🍽️ Meal Calories Entity / 当餐卡路里"
-      description: "An input_number to store current meal subtotal."
+      description: >
+        Number entity to store current meal subtotal.
+        Use: number.thirdreality_smart_scale_meal_calories
       selector:
         entity:
           filter:
+            - domain: number
             - domain: input_number
 
     today_cal_entity:
       name: "📊 Today Calories Entity / 今日总卡路里"
-      description: "An input_number to store today's total calories."
+      description: >
+        Number entity to store today's total calories.
+        Use: number.thirdreality_smart_scale_today_calories
       selector:
         entity:
           filter:
+            - domain: number
             - domain: input_number
 
     status_entity:
       name: "📋 Status Display Entity / 状态显示"
-      description: "An input_text to show current status on dashboard (max 255)."
+      description: >
+        Text entity to show current status on dashboard.
+        Use: text.thirdreality_smart_scale_calorie_status
       selector:
         entity:
           filter:
+            - domain: text
             - domain: input_text
 
     meal_log_entity:
       name: "📝 Meal Log Entity / 当餐记录"
-      description: "An input_text to store meal log (max 255)."
+      description: >
+        Text entity to store meal log.
+        Use: text.thirdreality_smart_scale_meal_log
       selector:
         entity:
           filter:
+            - domain: text
             - domain: input_text
 
     # ==================== 食物数据库（每100g卡路里，用户可修改）====================
@@ -292,7 +316,7 @@ action:
               - condition: template
                 value_template: "{{ cal_per_100g | float == 0 }}"
             then:
-              - service: input_text.set_value
+              - service: text.set_value
                 target:
                   entity_id: !input status_entity
                 data:
@@ -303,7 +327,7 @@ action:
               - condition: template
                 value_template: "{{ current_weight | float(0) <= 0 }}"
             then:
-              - service: input_text.set_value
+              - service: text.set_value
                 target:
                   entity_id: !input status_entity
                 data:
@@ -311,21 +335,21 @@ action:
               - stop: "No weight"
 
           # 更新当餐卡路里累计
-          - service: input_number.set_value
+          - service: number.set_value
             target:
               entity_id: !input meal_cal_entity
             data:
               value: "{{ (current_meal_cal + current_cal | float) | round(0) }}"
 
           # 追加到记录（注意255字符限制，超过就截断）
-          - service: input_text.set_value
+          - service: text.set_value
             target:
               entity_id: !input meal_log_entity
             data:
               value: "{% set new_entry = food_name ~ ' ' ~ current_weight | round(0) ~ 'g=' ~ current_cal ~ 'cal' %}{% if current_meal_log | length > 0 and current_meal_log != 'Empty' %}{{ (current_meal_log ~ ' | ' ~ new_entry)[:255] }}{% else %}{{ new_entry[:255] }}{% endif %}"
 
           # 更新状态显示
-          - service: input_text.set_value
+          - service: text.set_value
             target:
               entity_id: !input status_entity
             data:
@@ -366,12 +390,12 @@ action:
                       payload: '{"reset_button": "RESET"}'
 
           # 清空自定义输入
-          - service: input_text.set_value
+          - service: text.set_value
             target:
               entity_id: !input custom_food_name
             data:
               value: ""
-          - service: input_number.set_value
+          - service: number.set_value
             target:
               entity_id: !input custom_cal_entity
             data:
@@ -388,13 +412,13 @@ action:
               new_today_total: "{{ (current_today_cal + current_meal_cal) | round(0) }}"
               remaining: "{{ (daily_target | float - (current_today_cal + current_meal_cal)) | round(0) }}"
 
-          - service: input_number.set_value
+          - service: number.set_value
             target:
               entity_id: !input today_cal_entity
             data:
               value: "{{ new_today_total }}"
 
-          - service: input_text.set_value
+          - service: text.set_value
             target:
               entity_id: !input status_entity
             data:
@@ -428,12 +452,12 @@ action:
                 continue_on_error: true
 
           # 清空当餐记录
-          - service: input_number.set_value
+          - service: number.set_value
             target:
               entity_id: !input meal_cal_entity
             data:
               value: 0
-          - service: input_text.set_value
+          - service: text.set_value
             target:
               entity_id: !input meal_log_entity
             data:
@@ -446,22 +470,22 @@ action:
           - condition: trigger
             id: "reset"
         sequence:
-          - service: input_number.set_value
+          - service: number.set_value
             target:
               entity_id: !input today_cal_entity
             data:
               value: 0
-          - service: input_number.set_value
+          - service: number.set_value
             target:
               entity_id: !input meal_cal_entity
             data:
               value: 0
-          - service: input_text.set_value
+          - service: text.set_value
             target:
               entity_id: !input meal_log_entity
             data:
               value: "Empty"
-          - service: input_text.set_value
+          - service: text.set_value
             target:
               entity_id: !input status_entity
             data:

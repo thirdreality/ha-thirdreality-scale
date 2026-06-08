@@ -70,23 +70,12 @@ blueprint:
           filter:
             - domain: media_player
 
-    tts_service:
-      name: "🗣️ TTS Service"
+    tts_engine:
+      name: "🗣️ TTS Engine Entity"
       description: >
-        The TTS service to use. Common options:
-        - tts.speak (for Assist/ESPHome speakers)
-        - tts.google_translate_say
-        - tts.cloud_say (Nabu Casa)
-      default: "tts.speak"
-      selector:
-        text:
-
-    tts_language:
-      name: "🌐 TTS Language"
-      description: >
-        Language for voice announcements.
-        Examples: en, zh-cn, de, fr
-      default: "en"
+        The TTS engine entity. For Piper: tts.piper
+        Go to Developer Tools → States → search "tts" to find yours.
+      default: "tts.piper"
       selector:
         text:
 
@@ -108,20 +97,22 @@ blueprint:
       name: "🔘 Start Button / 开始按钮"
       description: >
         Press this to start making the selected cocktail.
-        Create in Helpers → Button, name it "Start Cocktail Making"
+        Use the integration's button entity: button.thirdreality_smart_scale_start_cocktail
       selector:
         entity:
           filter:
+            - domain: button
             - domain: input_button
 
     confirm_entity:
       name: "✅ Done Button / 已完成按钮"
       description: >
         Press this after pouring each ingredient (or wait for auto-advance when target weight is reached).
-        Create in Helpers → Button, name it "Done"
+        Use the integration's button entity: button.thirdreality_smart_scale_done
       selector:
         entity:
           filter:
+            - domain: button
             - domain: input_button
 
     scale_weight_sensor:
@@ -136,31 +127,34 @@ blueprint:
     status_entity:
       name: "📋 Status Display / 状态显示实体"
       description: >
-        An input_text entity to show current step on the dashboard.
-        Create in Helpers → Text, name it "cocktail_status", max length 255.
+        Text entity to show current step on the dashboard.
+        Use: text.thirdreality_smart_scale_cocktail_status
       selector:
         entity:
           filter:
+            - domain: text
             - domain: input_text
 
     recipe_list_entity:
       name: "📜 Recipe List Display / 配料清单显示"
       description: >
-        An input_text to show the full ingredient list on dashboard.
-        Create in Helpers → Text, name it "cocktail_recipe_list", max length 255.
+        Text entity to show the full ingredient list on dashboard.
+        Use: text.thirdreality_smart_scale_cocktail_recipe_list
       selector:
         entity:
           filter:
+            - domain: text
             - domain: input_text
 
     step_entity:
       name: "📄 Step Page Control / 页面步骤控制"
       description: >
-        An input_select to control which page is shown on the dashboard.
-        Create in Helpers → Dropdown, options: idle, mixing, complete
+        Select entity to control which page is shown on the dashboard.
+        Use: select.thirdreality_smart_scale_cocktail_step
       selector:
         entity:
           filter:
+            - domain: select
             - domain: input_select
 
     # ==================== Recipes (format: name1:weight1,name2:weight2) ====================
@@ -327,8 +321,7 @@ variables:
   selected_recipe: "{{ states(selector_entity) }}"
   tts_enabled: !input tts_enable
   tts_speaker_entity: !input tts_speaker
-  tts_svc: !input tts_service
-  tts_lang: !input tts_language
+  tts_engine_entity: !input tts_engine
   weight_sensor: !input scale_weight_sensor
   custom_recipe_ent: !input custom_recipe_entity
   confirm_eid: !input confirm_entity
@@ -406,7 +399,7 @@ action:
   # ============================================================
   # SETUP — switch to mixing page
   # ============================================================
-  - service: input_select.select_option
+  - service: select.select_option
     target:
       entity_id: !input step_entity
     data:
@@ -415,20 +408,20 @@ action:
   - delay:
       milliseconds: 200
 
-  - service: input_select.select_option
+  - service: select.select_option
     target:
       entity_id: !input step_entity
     data:
       option: "mixing"
 
   # Write full ingredient list
-  - service: input_text.set_value
+  - service: text.set_value
     target:
       entity_id: !input recipe_list_entity
     data:
       value: "{% for ing in all_ingredients %}{{ loop.index }}. {{ ing.name }} {{ ing.weight }}g{% if not loop.last %} | {% endif %}{% endfor %}"
 
-  - service: input_text.set_value
+  - service: text.set_value
     target:
       entity_id: !input status_entity
     data:
@@ -441,10 +434,10 @@ action:
     then:
       - action: tts.speak
         target:
-          entity_id: "{{ tts_speaker_entity }}"
+          entity_id: "{{ tts_engine_entity }}"
         data:
+          media_player_entity_id: "{{ tts_speaker_entity }}"
           message: "Let's make a {{ recipe }}! There are {{ total_steps }} steps. Please place your glass on the scale, then press the Done button to begin."
-          language: "{{ tts_lang }}"
         continue_on_error: true
 
   # WAIT for Done button — 用户确认杯子已放好
@@ -550,7 +543,7 @@ action:
                 args: ["{{ ing_weight | int }}"]
 
         # Update dashboard status
-        - service: input_text.set_value
+        - service: text.set_value
           target:
             entity_id: !input status_entity
           data:
@@ -563,10 +556,10 @@ action:
           then:
             - action: tts.speak
               target:
-                entity_id: "{{ tts_speaker_entity }}"
+                entity_id: "{{ tts_engine_entity }}"
               data:
+                media_player_entity_id: "{{ tts_speaker_entity }}"
                 message: "Step {{ step }} of {{ total_steps }}. Please add {{ ing_weight }} grams of {{ ing_name }}."
-                language: "{{ tts_lang }}"
               continue_on_error: true
 
         # WAIT for Done button OR weight reached target（用户确认杯子后才启用自动跳转）
@@ -638,13 +631,13 @@ action:
           args: []
 
   # Switch to complete page
-  - service: input_select.select_option
+  - service: select.select_option
     target:
       entity_id: !input step_entity
     data:
       option: "complete"
 
-  - service: input_text.set_value
+  - service: text.set_value
     target:
       entity_id: !input status_entity
     data:
@@ -657,23 +650,23 @@ action:
     then:
       - action: tts.speak
         target:
-          entity_id: "{{ tts_speaker_entity }}"
+          entity_id: "{{ tts_engine_entity }}"
         data:
+          media_player_entity_id: "{{ tts_speaker_entity }}"
           message: "Congratulations! Your {{ recipe }} is ready. All {{ total_steps }} ingredients have been added. Enjoy your cocktail! Cheers!"
-          language: "{{ tts_lang }}"
         continue_on_error: true
 
   # Auto-return to idle after 5s
   - delay:
       seconds: 5
 
-  - service: input_select.select_option
+  - service: select.select_option
     target:
       entity_id: !input step_entity
     data:
       option: "idle"
 
-  - service: input_text.set_value
+  - service: text.set_value
     target:
       entity_id: !input recipe_list_entity
     data:
