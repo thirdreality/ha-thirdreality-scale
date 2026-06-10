@@ -294,16 +294,31 @@ blueprint:
       selector:
         text:
 
+    cocktail_recipes_db_entity:
+      name: "🗃️ Cocktail Recipes Database Entity"
+      description: >
+        Text entity that stores all cocktail recipes.
+        Use: text.thirdreality_smart_scale_cocktail_recipes_db
+        Format: name1=ing1:w1,ing2:w2|name2=ing1:w1,...
+        Auto-managed by add_cocktail/remove_cocktail services.
+      default: {}
+      selector:
+        entity:
+          filter:
+            - domain: text
+
     custom_recipe_entity:
       name: "✏️ Custom Recipe Input"
       description: >
-        An input_text where users can type a custom recipe on the fly.
+        Text entity for custom recipe on the fly.
+        Use: text.thirdreality_smart_scale_custom_recipe
         Format: ingredient1:weight1,ingredient2:weight2,...
         Select "custom" from the cocktail dropdown to use this.
       default: {}
       selector:
         entity:
           filter:
+            - domain: text
             - domain: input_text
 
 mode: restart
@@ -324,6 +339,7 @@ variables:
   tts_engine_entity: !input tts_engine
   weight_sensor: !input scale_weight_sensor
   custom_recipe_ent: !input custom_recipe_entity
+  recipes_db_ent: !input cocktail_recipes_db_entity
   confirm_eid: !input confirm_entity
   r1_name: !input recipe_1_name
   r1_ing: !input recipe_1_ingredients
@@ -349,8 +365,21 @@ variables:
   r11_ing: !input recipe_11_ingredients
   r12_name: !input recipe_12_name
   r12_ing: !input recipe_12_ingredients
+  # First try to find recipe from the database entity, then fall back to static inputs
+  recipes_db_raw: "{{ states(recipes_db_ent) if recipes_db_ent is defined and states(recipes_db_ent) not in ['unknown', 'unavailable', '', None] else '' }}"
+  recipe_from_db: >
+    {% set found = namespace(val='') %}
+    {% if recipes_db_raw | length > 0 %}
+      {% for entry in recipes_db_raw.split('|') %}
+        {% set parts = entry.split('=') %}
+        {% if parts | length == 2 and parts[0] | trim == selected_recipe %}
+          {% set found.val = parts[1] | trim %}
+        {% endif %}
+      {% endfor %}
+    {% endif %}
+    {{ found.val }}
   recipe_data: >
-    {% if selected_recipe == 'custom' %}{{ states(custom_recipe_ent) }}{% elif selected_recipe == r1_name %}{{ r1_ing }}{% elif selected_recipe == r2_name %}{{ r2_ing }}{% elif selected_recipe == r3_name %}{{ r3_ing }}{% elif selected_recipe == r4_name %}{{ r4_ing }}{% elif selected_recipe == r5_name %}{{ r5_ing }}{% elif selected_recipe == r6_name %}{{ r6_ing }}{% elif selected_recipe == r7_name %}{{ r7_ing }}{% elif selected_recipe == r8_name %}{{ r8_ing }}{% elif selected_recipe == r9_name %}{{ r9_ing }}{% elif selected_recipe == r10_name %}{{ r10_ing }}{% elif selected_recipe == r11_name %}{{ r11_ing }}{% elif selected_recipe == r12_name %}{{ r12_ing }}{% else %}{% endif %}
+    {% if selected_recipe == 'custom' %}{{ states(custom_recipe_ent) }}{% elif recipe_from_db | trim | length > 0 %}{{ recipe_from_db }}{% elif selected_recipe == r1_name %}{{ r1_ing }}{% elif selected_recipe == r2_name %}{{ r2_ing }}{% elif selected_recipe == r3_name %}{{ r3_ing }}{% elif selected_recipe == r4_name %}{{ r4_ing }}{% elif selected_recipe == r5_name %}{{ r5_ing }}{% elif selected_recipe == r6_name %}{{ r6_ing }}{% elif selected_recipe == r7_name %}{{ r7_ing }}{% elif selected_recipe == r8_name %}{{ r8_ing }}{% elif selected_recipe == r9_name %}{{ r9_ing }}{% elif selected_recipe == r10_name %}{{ r10_ing }}{% elif selected_recipe == r11_name %}{{ r11_ing }}{% elif selected_recipe == r12_name %}{{ r12_ing }}{% else %}{% endif %}
   recipe: "{{ selected_recipe }}"
   notif_id: "cocktail_mixing"
   all_ingredients: >

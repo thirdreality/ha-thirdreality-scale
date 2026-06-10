@@ -1,0 +1,64 @@
+add_food:
+  name: Add Food
+  description: "Add a food item to the food preset dropdown with its calorie value."
+  fields:
+    name:
+      name: Food Name
+      description: "Name of the food to add (e.g., Chicken Wings)"
+      required: true
+      example: "Chicken Wings"
+      selector:
+        text:
+    calories_per_100g:
+      name: Calories per 100g
+      description: "Calorie value per 100 grams"
+      required: true
+      example: 290
+      selector:
+        number:
+          min: 1
+          max: 2000
+          unit_of_measurement: "kcal"
+
+remove_food:
+  name: Remove Food
+  description: "Remove a food item from the food preset dropdown."
+  fields:
+    name:
+      name: Food Name
+      description: "Name of the food to remove"
+      required: true
+      example: "Tofu"
+      selector:
+        text:
+
+add_cocktail:
+  name: Add Cocktail
+  description: "Add a cocktail recipe to the cocktail dropdown."
+  fields:
+    name:
+      name: Cocktail Name
+      description: "Name of the cocktail (e.g., margarita)"
+      required: true
+      example: "margarita"
+      selector:
+        text:
+    ingredients:
+      name: Ingredients
+      description: "Recipe in format: ingredient1:weight1,ingredient2:weight2 (weight in grams)"
+      required: true
+      example: "Tequila:50,Triple Sec:30,Fresh Lime Juice:25"
+      selector:
+        text:
+
+remove_cocktail:
+  name: Remove Cocktail
+  description: "Remove a cocktail from the cocktail dropdown."
+  fields:
+    name:
+      name: Cocktail Name
+      description: "Name of the cocktail to remove"
+      required: true
+      example: "strawberry_daiquiri"
+      selector:
+        text:

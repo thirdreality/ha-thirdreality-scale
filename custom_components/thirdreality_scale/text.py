@@ -56,6 +56,12 @@ async def async_setup_entry(
         ])
 
     if FEATURE_COCKTAIL in features:
+        # Build default cocktail recipes database string
+        # Format: name1=ing1:w1,ing2:w2|name2=ing1:w1,ing2:w2
+        from .const import DEFAULT_COCKTAIL_RECIPES
+        default_cocktail_db_str = "|".join(
+            f"{name}={ingredients}" for name, ingredients in DEFAULT_COCKTAIL_RECIPES.items()
+        )
         entities.extend([
             ScaleText(
                 entry,
@@ -79,6 +85,14 @@ async def async_setup_entry(
                 name="Custom Recipe",
                 icon="mdi:pencil-outline",
                 initial_value="",
+                max_length=255,
+            ),
+            ScaleText(
+                entry,
+                key="cocktail_recipes_db",
+                name="Cocktail Recipes Database",
+                icon="mdi:database-outline",
+                initial_value=default_cocktail_db_str,
                 max_length=255,
             ),
         ])

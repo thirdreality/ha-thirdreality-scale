@@ -251,6 +251,7 @@ def _install_automations(
                             "status_entity": f"text.{prefix}_cocktail_status",
                             "recipe_list_entity": f"text.{prefix}_cocktail_recipe_list",
                             "step_entity": f"select.{prefix}_cocktail_step",
+                            "cocktail_recipes_db_entity": f"text.{prefix}_cocktail_recipes_db",
                             "custom_recipe_entity": f"text.{prefix}_custom_recipe",
                         },
                     },

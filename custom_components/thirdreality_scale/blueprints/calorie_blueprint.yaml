@@ -244,7 +244,7 @@ blueprint:
             - domain: text
             - domain: input_text
 
-    # ==================== 食物数据库（每100g卡路里，用户可修改）====================
+    # ==================== 食物数据库 ====================
     food_database:
       name: "🗃️ Food Database / 食物数据库"
       description: >
