@@ -1,4 +1,4 @@
-﻿"""Button platform for ThirdReality Smart Scale."""
+"""Button platform for ThirdReality Smart Scale."""
 from __future__ import annotations
 
 import logging

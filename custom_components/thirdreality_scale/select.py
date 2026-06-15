@@ -1,4 +1,4 @@
-﻿"""Select platform for ThirdReality Smart Scale."""
+"""Select platform for ThirdReality Smart Scale."""
 from __future__ import annotations
 
 import json
