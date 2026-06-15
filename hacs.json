@@ -1,6 +1,5 @@
 {
   "name": "ThirdReality Smart Scale",
   "render_readme": true,
-  "homeassistant": "2024.1.0",
-  "icon": "icon.png"
+  "homeassistant": "2024.1.0"
 }
