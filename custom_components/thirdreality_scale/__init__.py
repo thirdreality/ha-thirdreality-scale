@@ -1,4 +1,4 @@
-﻿"""ThirdReality Smart Scale integration for Home Assistant."""
+"""ThirdReality Smart Scale integration for Home Assistant."""
 from __future__ import annotations
 
 import json
