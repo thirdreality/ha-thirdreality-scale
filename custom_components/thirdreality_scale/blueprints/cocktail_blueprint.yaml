@@ -509,7 +509,9 @@ action:
           cluster_type: in
           command: 1
           command_type: server
-          args: []
+          manufacturer: 0x1407
+          params: {}
+        continue_on_error: true
 
   - delay:
       seconds: 1
@@ -545,7 +547,9 @@ action:
                 cluster_type: in
                 command: 0
                 command_type: server
-                args: []
+                manufacturer: 0x1407
+                params: {}
+              continue_on_error: true
 
         - delay:
             milliseconds: 800
@@ -569,7 +573,10 @@ action:
                 cluster_type: in
                 command: 3
                 command_type: server
-                args: ["{{ ing_weight | int }}"]
+                manufacturer: 0x1407
+                params:
+                  target_val: "{{ ing_weight | int }}"
+              continue_on_error: true
 
         # Update dashboard status
         - service: text.set_value
@@ -624,7 +631,9 @@ action:
                     cluster_type: in
                     command: 2
                     command_type: server
-                    args: []
+                    manufacturer: 0x1407
+                    params: {}
+                  continue_on_error: true
             - service: persistent_notification.create
               data:
                 title: "⏰ Timeout"
@@ -657,7 +666,9 @@ action:
           cluster_type: in
           command: 2
           command_type: server
-          args: []
+          manufacturer: 0x1407
+          params: {}
+        continue_on_error: true
 
   # Switch to complete page
   - service: select.select_option

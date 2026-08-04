@@ -12,6 +12,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 
 from .const import (
     DOMAIN,
@@ -135,8 +136,13 @@ def _install_blueprints(hass: HomeAssistant, features: list[str]) -> None:
                 _LOGGER.info("Installed blueprint: %s", filename)
 
 
-def _get_weight_sensor_entity(entry: ConfigEntry) -> str:
-    """Get the weight sensor entity ID based on platform config."""
+def _get_weight_sensor_entity(entry: ConfigEntry, hass: HomeAssistant | None = None) -> str:
+    """Get the weight sensor entity ID based on platform config.
+
+    For Z2M: entity ID is predictable (sensor.{topic}_weight).
+    For ZHA: entity ID depends on device name and may have suffixes,
+    so we search the entity registry for the correct sensor.
+    """
     data = entry.data
     platform = data.get(CONF_PLATFORM, PLATFORM_Z2M)
     topic = data.get(CONF_Z2M_TOPIC, "")
@@ -145,9 +151,66 @@ def _get_weight_sensor_entity(entry: ConfigEntry) -> str:
     if platform == PLATFORM_Z2M and topic:
         return f"sensor.{topic}_weight"
     elif ieee:
-        clean_ieee = ieee.replace(":", "_").replace("-", "_")
+        # Try to find via entity registry (most reliable for ZHA)
+        if hass is not None:
+            found = _find_zha_weight_sensor(hass, ieee)
+            if found:
+                return found
+        # Fallback: guess based on IEEE format
+        clean_ieee = ieee.replace(":", "").replace("-", "").lower()
+        if not clean_ieee.startswith("0x"):
+            clean_ieee = f"0x{clean_ieee}"
         return f"sensor.{clean_ieee}_weight"
     return "sensor.REPLACE_WITH_YOUR_SCALE_WEIGHT_SENSOR"
+
+
+def _find_zha_weight_sensor(hass: HomeAssistant, ieee: str) -> str | None:
+    """Find the weight sensor entity for a ZHA device by IEEE address.
+
+    Strategy: find the ZHA device by IEEE, then look for a sensor entity
+    with unit_of_measurement='g' on that device. This works regardless of
+    the device name or entity naming scheme.
+    """
+    try:
+        dev_reg = dr.async_get(hass)
+        ent_reg = er.async_get(hass)
+
+        # Normalize IEEE for comparison (remove separators, lowercase, strip 0x)
+        normalized = ieee.replace(":", "").replace("-", "").lower()
+        if normalized.startswith("0x"):
+            normalized = normalized[2:]
+
+        # Find ZHA device by IEEE address
+        target_device_id = None
+        for device in dev_reg.devices.values():
+            for domain, ident in device.identifiers:
+                if domain != "zha":
+                    continue
+                norm_ident = ident.replace(":", "").replace("-", "").lower()
+                if norm_ident.startswith("0x"):
+                    norm_ident = norm_ident[2:]
+                if norm_ident == normalized:
+                    target_device_id = device.id
+                    break
+            if target_device_id:
+                break
+
+        if not target_device_id:
+            return None
+
+        # Find sensor with unit_of_measurement='g' on this device
+        # (the scale only has one gram-unit sensor: the weight sensor)
+        for entity in ent_reg.entities.values():
+            if entity.device_id != target_device_id:
+                continue
+            if entity.domain != "sensor":
+                continue
+            if (entity.unit_of_measurement or "").lower() == "g":
+                return entity.entity_id
+
+        return None
+    except Exception:
+        return None
 
 
 def _install_automations(
@@ -167,7 +230,7 @@ def _install_automations(
         zha_ieee = data.get(CONF_ZHA_IEEE, "")
         tts_speaker = data.get(CONF_TTS_SPEAKER, "")
         tts_engine = data.get(CONF_TTS_ENGINE, DEFAULT_TTS_ENGINE)
-        weight_sensor = _get_weight_sensor_entity(entry)
+        weight_sensor = _get_weight_sensor_entity(entry, hass)
 
         # Entity ID prefix: based on how HA names entities from this integration
         prefix = "thirdreality_smart_scale"
@@ -291,7 +354,7 @@ def _install_dashboards_storage(
     and config files that HA reads on startup. Works across all HA versions.
     """
     try:
-        weight_sensor = _get_weight_sensor_entity(entry)
+        weight_sensor = _get_weight_sensor_entity(entry, hass)
         source_dir = Path(__file__).parent / "dashboards"
         storage_dir = Path(hass.config.path(".storage"))
         storage_dir.mkdir(parents=True, exist_ok=True)
@@ -408,7 +471,6 @@ async def _register_dashboards_in_lovelace(
             if url_path in dashboards:
                 _LOGGER.debug("Dashboard already active: %s", url_path)
                 continue
-
             # Try to create via collection API (works on HA 2024.x+)
             created = False
             # Try different attribute names for the collection
