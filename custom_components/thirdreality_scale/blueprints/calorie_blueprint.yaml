@@ -273,6 +273,7 @@ trigger:
 variables:
   platform: !input platform_type
   z2m_topic: !input z2m_device_topic
+  zha_ieee: !input zha_ieee_address
   food_db_raw: !input food_database
   food_select_entity: !input food_selector
   weight_entity: !input weight_sensor
@@ -388,6 +389,18 @@ action:
                     data:
                       topic: "zigbee2mqtt/{{ z2m_topic }}/set"
                       payload: '{"reset_button": "RESET"}'
+            default:
+              - service: zha.issue_zigbee_cluster_command
+                data:
+                  ieee: "{{ zha_ieee }}"
+                  endpoint_id: 1
+                  cluster_id: 0xFF0C
+                  cluster_type: in
+                  command: 0
+                  command_type: server
+                  manufacturer: 0x1407
+                  params: {}
+                continue_on_error: true
 
           # 清空自定义输入
           - service: text.set_value

@@ -224,6 +224,8 @@ async def async_setup_entry(
         hass.services.async_register(DOMAIN, "remove_cocktail", handle_remove_cocktail)
 
 
+
+
 def _load_data(hass: HomeAssistant, storage_key: str, defaults: dict) -> dict:
     """Load user data from storage, or return defaults."""
     storage_path = Path(hass.config.path(".storage", storage_key))

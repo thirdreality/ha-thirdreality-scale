@@ -99,9 +99,20 @@ class ScaleButton(ButtonEntity):
         }
 
     async def async_press(self) -> None:
-        """Handle the button press.
+        """Handle the button press — dispatch to business logic."""
+        entry_data = self.hass.data[DOMAIN].get(self._entry.entry_id, {})
+        calorie_tracker = entry_data.get("calorie_tracker")
+        cocktail_mixer = entry_data.get("cocktail_mixer")
 
-        The actual logic is handled by blueprint automations that
-        listen for state changes on these button entities.
-        """
-        _LOGGER.debug("Button pressed: %s", self._key)
+        if self._key == "add_food" and calorie_tracker:
+            await calorie_tracker.add_food()
+        elif self._key == "finish_meal" and calorie_tracker:
+            await calorie_tracker.finish_meal()
+        elif self._key == "reset_today" and calorie_tracker:
+            await calorie_tracker.reset_today()
+        elif self._key == "start_cocktail" and cocktail_mixer:
+            await cocktail_mixer.start()
+        elif self._key == "done" and cocktail_mixer:
+            cocktail_mixer.signal_done()
+        else:
+            _LOGGER.debug("Button pressed but no handler: %s", self._key)

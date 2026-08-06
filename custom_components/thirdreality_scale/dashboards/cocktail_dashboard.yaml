@@ -104,7 +104,7 @@
                     {% endif %}
 
                 - type: tile
-                  entity: WEIGHT_SENSOR_ENTITY
+                  entity: sensor.thirdreality_smart_scale_weight
                   name: "⚖️ Current Weight"
                   icon: mdi:scale
                   color: cyan
