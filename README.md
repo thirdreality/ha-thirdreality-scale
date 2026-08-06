@@ -11,7 +11,7 @@ ThirdReality Smart Scale Integration is a custom component for Home Assistant th
 - **Cocktail Mixing Assistant** — step-by-step guided mixing with real-time weight tracking
 - **Calorie Tracker** — weigh food, log calories per meal, and get daily intake summaries
 - **Voice guidance** — audio prompts for each step (works with ThirdReality smart speakers)
-- **Zero manual setup** — all entities and logic are created automatically
+- **Auto-creates all helper entities** — zero manual setup after installation
 - **Supported platforms:** Zigbee2MQTT, ZHA
 
 ## Requirements
@@ -28,98 +28,101 @@ Or manually: HACS > Integrations > Search **ThirdReality Smart Scale** > Click i
 
 After download, **restart Home Assistant**.
 
-## Setup (3 Steps)
+## Configuration
 
 ### Step 1: Add Integration
 
-Go to Settings > Devices & Services > Add Integration > Search **ThirdReality Smart Scale**
+After restart, go to Settings > Devices & Services > Add Integration > Search **ThirdReality Smart Scale**
 
 [![Open your Home Assistant instance and start setting up ThirdReality Smart Scale.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=thirdreality_scale)
 
-Follow the wizard:
-1. **Select platform** (Zigbee2MQTT or ZHA) and **select your scale** from the dropdown
-2. **Choose features** (Cocktail, Calorie, or both)
-3. **Configure voice** (optional) — select your TTS engine and speaker
+### Step 2: Select Platform and Device
 
-After completing the wizard, all entities and logic are automatically created. **No blueprints or automations needed!**
+- **Platform:** select Zigbee2MQTT or ZHA
+- **Device:** select your scale from the dropdown
 
-### Step 2: Import Dashboard (Copy & Paste)
+
+### Step 3: Select Features
+
+Check the features you want to enable:
+- Cocktail Mixing Assistant
+- Calorie Tracker
+
+
+### Step 4: Voice Settings (Optional)
+
+- **TTS Engine:** select your TTS entity
+- **Speaker:** select your `media_player` entity for voice announcements
+
+
+### Step 5: Set Up Dashboards
+
+After configuration, set up the dashboards:
 
 1. Go to **Settings > Dashboards > + Add Dashboard**
 2. Name it (e.g., "Cocktail" or "Calories"), click Create
-3. Open the dashboard > click **⋮ menu** (top right) > **Edit Dashboard** > **⋮ menu** > **Raw configuration editor**
-4. Replace the content with the YAML below:
-
+3. Open the new dashboard, click the **⋮ menu** (top right) > **Edit Dashboard** > **⋮ menu** > **Raw configuration editor**
+4. Replace the content with the YAML from one of these files:
    - **Cocktail Dashboard:** [cocktail_dashboard.yaml](custom_components/thirdreality_scale/dashboards/cocktail_dashboard.yaml)
    - **Calorie Dashboard:** [calorie_dashboard.yaml](custom_components/thirdreality_scale/dashboards/calorie_dashboard.yaml)
+5. Click **Save**
 
-5. Click **Save** — done!
+No modifications needed. The dashboard YAML works directly with the entities created by this integration.
 
-> **No modifications needed.** The dashboard YAML works out-of-the-box with the entities created by this integration.
-
-### Step 3: Use It!
-
-That's it. Open your dashboard and start using the scale.
-
----
 
 ## Usage
 
 ### Calorie Tracker
 
-1. Open the **Calories** dashboard
-2. Select a food from the dropdown (e.g. Apple, Chicken Breast) or enter a custom food name and calories per 100g
-3. Place the food on the scale — real-time weight and calories are shown
-4. Click **Add ** to log this item to the current meal
-5. Repeat for more foods
-6. Click **Finish Meal ** when done — the meal total is added to today's count
-7. Click **Reset ** to start a new day
+1. Click **Calories** in the sidebar
+2. Select a food from the "Select Food" dropdown (e.g. Apple, Chicken Breast) or enter a custom food name and calories per 100g
+3. Place the food on the scale, the page shows real-time weight and calories
+4. Click **Add +** to log this item to the current meal
+5. Repeat steps 2-4 for more foods
+6. When the meal is done, click **Finish Meal**, the meal total is added to today's count
+7. To start a new day, click **Reset**
 
 **Voice prompts:** confirmation on each Add, high-calorie warnings, meal summaries, daily limit alerts.
 
 
 ### Cocktail Mixing
 
-1. Open the **Cocktail** dashboard
-2. Choose a cocktail (e.g. Mojito) or select **Custom** and enter your own recipe
-3. Click ** Start Mixing**
-4. Place your glass on the scale, click **Done **
-5. Pour each ingredient until the target weight is reached — auto-advances to next step
-6. When all ingredients are added, ** Cheers!** — auto-returns to selection
+1. Click **Cocktail** in the sidebar
+2. Choose a cocktail from "Choose Your Cocktail" (e.g. Mojito) or select **Custom** and enter your own recipe
+3. Click **Start Mixing**
+4. The page shows "Place glass on scale", place your glass and click **Done**
+5. Follow on-screen prompts: pour each ingredient until the target weight is reached
+6. The scale auto-advances to the next step, or click **Done** manually
+7. When all ingredients are added, **Cheers!** appears and auto-returns to selection after 5 seconds
 
 **Voice prompts:** start instruction, ingredient guidance for each step, completion celebration.
 
 
-### Adding Custom Recipes
+### Adding Custom Cocktail Recipes
 
-Go to **Developer Tools > Actions** and call:
-
-```yaml
-service: thirdreality_scale.add_cocktail
-data:
-  name: "margarita"
-  ingredients: "Tequila:50,Triple Sec:30,Fresh Lime Juice:25"
-```
-
-The new cocktail appears in the dropdown immediately.
-
-Similarly for food:
+1. Go to **Developer Tools > Actions**
+2. Select service `thirdreality_scale.add_cocktail`
+3. Fill in the data and click **Execute**:
 
 ```yaml
-service: thirdreality_scale.add_food
+action: thirdreality_scale.add_cocktail
 data:
-  name: "Chicken Wings"
-  calories_per_100g: 290
+  name: pina_colada
+  ingredients: White Rum:50,Pineapple Juice:80,Coconut Cream:30
 ```
+
+Format: `ingredient:weight_in_grams`, separated by commas.
+
+The new cocktail appears in the Cocktail dashboard dropdown immediately.
 
 ## Troubleshooting
 
 | Problem | Solution |
 |---------|----------|
-| Scale not in dropdown during setup | Verify scale is connected in Zigbee2MQTT / ZHA |
-| Voice not working | Check that media_player and TTS entities are available |
-| Weight shows 0 | Check Developer Tools > States for your original weight sensor |
-| Dashboard not updating | Ensure integration is configured and HA restarted |
+| Scale not in dropdown | Verify scale is connected in Zigbee2MQTT / ZHA |
+| Voice not working | Check that media_player entity is available and TTS is configured |
+| Weight not updating | Press "Start Report" on the scale's ZHA device page |
+| Dashboard not showing data | Ensure integration is configured and HA restarted |
 
 ## License
 
