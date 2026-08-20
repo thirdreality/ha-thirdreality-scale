@@ -162,7 +162,7 @@ class CocktailMixer:
                 await asyncio.sleep(2)
 
             # ============ DONE ============
-            await self._commands.set_weight(0)  # Clear target weight to avoid beeping in calorie mode
+            await self._commands.set_weight(0)  # Clear target weight — DO NOT stop_report, keep scale reporting for calorie mode
 
             # Switch to complete page
             await _select_option(hass, step_eid, "complete")

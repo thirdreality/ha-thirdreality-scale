@@ -6,6 +6,7 @@ import logging
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
@@ -34,18 +35,21 @@ async def async_setup_entry(
                 key="add_food",
                 name="Add Food",
                 icon="mdi:plus-circle",
+                entity_category=EntityCategory.CONFIG,
             ),
             ScaleButton(
                 entry,
                 key="finish_meal",
                 name="Finish Meal",
                 icon="mdi:check-circle",
+                entity_category=EntityCategory.CONFIG,
             ),
             ScaleButton(
                 entry,
                 key="reset_today",
                 name="Reset Today",
                 icon="mdi:delete-outline",
+                entity_category=EntityCategory.CONFIG,
             ),
         ])
 
@@ -56,12 +60,14 @@ async def async_setup_entry(
                 key="start_cocktail",
                 name="Start Cocktail",
                 icon="mdi:play-circle",
+                entity_category=EntityCategory.CONFIG,
             ),
             ScaleButton(
                 entry,
                 key="done",
                 name="Done",
                 icon="mdi:check-bold",
+                entity_category=EntityCategory.CONFIG,
             ),
         ])
 
@@ -80,6 +86,7 @@ class ScaleButton(ButtonEntity):
         key: str,
         name: str,
         icon: str,
+        entity_category: EntityCategory | None = None,
     ) -> None:
         """Initialize the button entity."""
         self._entry = entry
@@ -87,6 +94,8 @@ class ScaleButton(ButtonEntity):
         self._attr_name = name
         self._attr_icon = icon
         self._attr_unique_id = f"{DOMAIN}_{entry.entry_id}_{key}"
+        if entity_category is not None:
+            self._attr_entity_category = entity_category
 
     @property
     def device_info(self):

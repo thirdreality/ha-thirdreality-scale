@@ -10,6 +10,7 @@ from homeassistant.components.number import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
@@ -45,6 +46,7 @@ async def async_setup_entry(
                 initial_value=0,
                 mode=NumberMode.BOX,
                 unit=None,
+                entity_category=EntityCategory.DIAGNOSTIC,
             ),
             ScaleNumber(
                 entry,
@@ -57,6 +59,7 @@ async def async_setup_entry(
                 initial_value=0,
                 mode=NumberMode.BOX,
                 unit="kcal",
+                entity_category=EntityCategory.DIAGNOSTIC,
             ),
             ScaleNumber(
                 entry,
@@ -69,6 +72,7 @@ async def async_setup_entry(
                 initial_value=0,
                 mode=NumberMode.BOX,
                 unit="kcal",
+                entity_category=None,
             ),
             ScaleNumber(
                 entry,
@@ -81,6 +85,7 @@ async def async_setup_entry(
                 initial_value=DEFAULT_DAILY_TARGET,
                 mode=NumberMode.BOX,
                 unit="kcal",
+                entity_category=EntityCategory.CONFIG,
             ),
             ScaleNumber(
                 entry,
@@ -93,6 +98,7 @@ async def async_setup_entry(
                 initial_value=DEFAULT_MEAL_WARNING,
                 mode=NumberMode.BOX,
                 unit="kcal",
+                entity_category=EntityCategory.CONFIG,
             ),
         ])
 
@@ -117,6 +123,7 @@ class ScaleNumber(RestoreNumber):
         initial_value: float,
         mode: NumberMode,
         unit: str | None,
+        entity_category: EntityCategory | None = None,
     ) -> None:
         """Initialize the number entity."""
         self._entry = entry
@@ -131,6 +138,8 @@ class ScaleNumber(RestoreNumber):
         self._attr_native_unit_of_measurement = unit
         self._attr_unique_id = f"{DOMAIN}_{entry.entry_id}_{key}"
         self._initial_value = initial_value
+        if entity_category is not None:
+            self._attr_entity_category = entity_category
 
     @property
     def device_info(self):

@@ -2,12 +2,17 @@
 
 Handles:
 - add_food: calculate calories, update meal log, tare scale, TTS announce
-- finish_meal: add meal total to today's total, TTS summary, clear meal
+- finish_meal: add meal total to today's total, TTS summary, clear meal, save history
 - reset_today: clear all calorie data
+- get_history: retrieve calorie history
 """
 from __future__ import annotations
 
+import json
 import logging
+from datetime import datetime
+from pathlib import Path
+
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN, DEFAULT_FOOD_DATABASE
@@ -40,6 +45,10 @@ class CalorieTracker:
     async def add_food(self) -> None:
         """Add current food on scale to the meal log."""
         hass = self._hass
+
+        # Ensure scale is reporting and clear any leftover target weight from cocktail mode
+        await self._commands.start_report()
+        await self._commands.set_weight(0)
 
         # Read current state
         weight_sensor = self._entity_id("weight")
@@ -113,7 +122,7 @@ class CalorieTracker:
         await _set_number(hass, custom_cal_eid, 0)
 
     async def finish_meal(self) -> None:
-        """Finish the current meal: add to today's total, clear meal."""
+        """Finish the current meal: add to today's total, clear meal, save history."""
         hass = self._hass
         meal_cal_eid = self._entity_id("meal_calories")
         today_cal_eid = self._entity_id("today_calories")
@@ -126,8 +135,15 @@ class CalorieTracker:
         daily_target = self._get_daily_target()
         remaining = round(daily_target - new_today_total)
 
+        # Get meal log before clearing
+        meal_log_str = _get_state(hass, meal_log_eid)
+
         # Update today total
         await _set_number(hass, today_cal_eid, new_today_total)
+
+        # Save to history
+        if current_meal_cal > 0:
+            await self._save_meal_history(current_meal_cal, meal_log_str)
 
         # Update status
         await _set_text(
@@ -147,6 +163,9 @@ class CalorieTracker:
         await _set_number(hass, meal_cal_eid, 0)
         await _set_text(hass, meal_log_eid, "Empty")
 
+        # Update history display entity
+        await self._update_history_entity()
+
     async def reset_today(self) -> None:
         """Reset all calorie data for today."""
         hass = self._hass
@@ -158,7 +177,7 @@ class CalorieTracker:
         await _set_number(hass, today_cal_eid, 0)
         await _set_number(hass, meal_cal_eid, 0)
         await _set_text(hass, meal_log_eid, "Empty")
-        await _set_text(hass, status_eid, "🗑️ Reset! Today's calories cleared. Ready to start fresh.")
+        await _set_text(hass, status_eid, "🔄 Counter cleared — past meals still saved in history.")
 
         await self._tts_speak("Calories reset. Today's count is back to zero. Ready to start fresh!")
 
@@ -171,6 +190,122 @@ class CalorieTracker:
         """Get meal calorie warning threshold from entity."""
         eid = self._entity_id("meal_calorie_warning")
         return _get_float(self._hass, eid) or 800
+
+    # ============================================================
+    # History
+    # ============================================================
+
+    def _history_file(self) -> Path:
+        """Get the path to the history JSON file."""
+        return Path(self._hass.config.config_dir) / ".storage" / "thirdreality_scale_calorie_history.json"
+
+    def _load_history(self) -> list[dict]:
+        """Load history from JSON file."""
+        path = self._history_file()
+        if not path.exists():
+            return []
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return data if isinstance(data, list) else []
+        except Exception:
+            return []
+
+    def _save_history(self, history: list[dict]) -> None:
+        """Save history to JSON file."""
+        path = self._history_file()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Keep only last 90 days of data (max ~500 entries)
+        history = history[-500:]
+        try:
+            path.write_text(json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as err:
+            _LOGGER.warning("Failed to save calorie history: %s", err)
+
+    async def _save_meal_history(self, meal_calories: float, meal_log: str) -> None:
+        """Save a finished meal to the history file."""
+        now = datetime.now()
+        entry = {
+            "date": now.strftime("%Y-%m-%d"),
+            "time": now.strftime("%H:%M"),
+            "calories": round(meal_calories),
+            "items": meal_log if meal_log and meal_log not in ("Empty", "") else "",
+        }
+
+        history = await self._hass.async_add_executor_job(self._load_history)
+        history.append(entry)
+        await self._hass.async_add_executor_job(self._save_history, history)
+
+    async def _update_history_entity(self) -> None:
+        """Update the history text entity with recent data for frontend display.
+
+        Format: JSON string with last 7 days summary + today's meals.
+        """
+        hass = self._hass
+        history_eid = self._entity_id("calorie_history")
+        if not history_eid:
+            return
+
+        history = await hass.async_add_executor_job(self._load_history)
+        if not history:
+            await _set_text(hass, history_eid, "[]")
+            return
+
+        # Build daily summary for last 7 days
+        today = datetime.now().strftime("%Y-%m-%d")
+        daily_data: dict[str, dict] = {}
+        for entry in history:
+            date = entry.get("date", "")
+            if not date:
+                continue
+            if date not in daily_data:
+                daily_data[date] = {"date": date, "total": 0, "meals": []}
+            daily_data[date]["total"] += entry.get("calories", 0)
+            daily_data[date]["meals"].append({
+                "time": entry.get("time", ""),
+                "cal": entry.get("calories", 0),
+                "items": entry.get("items", ""),
+            })
+
+        # Get last 7 days sorted
+        sorted_days = sorted(daily_data.keys(), reverse=True)[:7]
+        result = [daily_data[d] for d in sorted_days]
+
+        # Truncate to fit in 255 chars — use compact format
+        # Format: date:total:meal1_time=cal,meal2_time=cal|date:total:...
+        compact_lines = []
+        for day in result:
+            meals_str = ",".join(
+                f"{m['time']}={m['cal']}" for m in day["meals"]
+            )
+            compact_lines.append(f"{day['date']}:{day['total']}:{meals_str}")
+
+        history_str = "|".join(compact_lines)
+        # If too long, trim older days
+        while len(history_str) > 255 and len(compact_lines) > 1:
+            compact_lines.pop()
+            history_str = "|".join(compact_lines)
+
+        await _set_text(hass, history_eid, history_str[:255])
+
+    async def get_history_json(self) -> str:
+        """Get full history as JSON string (for API/frontend use)."""
+        history = await self._hass.async_add_executor_job(self._load_history)
+        # Build daily summary
+        daily_data: dict[str, dict] = {}
+        for entry in history:
+            date = entry.get("date", "")
+            if not date:
+                continue
+            if date not in daily_data:
+                daily_data[date] = {"date": date, "total": 0, "meals": []}
+            daily_data[date]["total"] += entry.get("calories", 0)
+            daily_data[date]["meals"].append({
+                "time": entry.get("time", ""),
+                "cal": entry.get("calories", 0),
+                "items": entry.get("items", ""),
+            })
+        sorted_days = sorted(daily_data.keys(), reverse=True)[:30]
+        return json.dumps([daily_data[d] for d in sorted_days], ensure_ascii=False)
 
     async def _tts_speak(self, message: str) -> None:
         """Speak a TTS message if configured."""

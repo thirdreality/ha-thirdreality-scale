@@ -8,6 +8,7 @@ from pathlib import Path
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
@@ -88,6 +89,7 @@ async def async_setup_entry(
                 options=["idle", "mixing", "complete"],
                 initial_option="idle",
                 storage_key=None,
+                entity_category=EntityCategory.DIAGNOSTIC,
             ),
         ])
 
@@ -305,6 +307,7 @@ class ScaleSelect(SelectEntity, RestoreEntity):
         options: list[str],
         initial_option: str | None = None,
         storage_key: str | None = None,
+        entity_category: EntityCategory | None = None,
     ) -> None:
         """Initialize the select entity."""
         self._hass_ref = hass
@@ -317,6 +320,8 @@ class ScaleSelect(SelectEntity, RestoreEntity):
         self._attr_unique_id = f"{DOMAIN}_{entry.entry_id}_{key}"
         self._initial_option = initial_option
         self._storage_key = storage_key
+        if entity_category is not None:
+            self._attr_entity_category = entity_category
 
     @property
     def device_info(self):

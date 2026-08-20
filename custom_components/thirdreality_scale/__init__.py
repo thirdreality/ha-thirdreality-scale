@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.event import async_track_time_change
 
 from .const import (
     DOMAIN,
@@ -31,10 +33,74 @@ _LOGGER = logging.getLogger(__name__)
 # Platforms registered by this integration
 PLATFORMS = ["sensor", "number", "text", "select", "button"]
 
+# Frontend panel
+PANEL_TITLE = "Smart Scale"
+PANEL_ICON = "mdi:scale"
+PANEL_FRONTEND_PATH = "thirdreality-scale"
+
+def _get_panel_url():
+    """Generate panel URL with file hash for cache busting."""
+    import hashlib
+    panel_file = Path(__file__).parent / "frontend" / "dist" / "thirdreality-scale-panel.js"
+    try:
+        file_hash = hashlib.md5(panel_file.read_bytes()).hexdigest()[:8]
+    except Exception:
+        file_hash = "latest"
+    return f"/thirdreality_scale_panel_{file_hash}"
+
+
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Set up the ThirdReality Scale component."""
+    hass.data.setdefault(DOMAIN, {})
+    return True
+
+
+async def _async_register_panel(hass: HomeAssistant) -> None:
+    """Register the frontend panel in the sidebar (same approach as Alarmo)."""
+    # Skip if already registered
+    if hass.data.get("frontend_panels", {}).get(PANEL_FRONTEND_PATH):
+        return
+
+    from homeassistant.components.http import StaticPathConfig
+    from homeassistant.components import panel_custom
+
+    # Path to the actual JS file (not directory!)
+    panel_file = str(Path(__file__).parent / "frontend" / "dist" / "thirdreality-scale-panel.js")
+
+    panel_url = _get_panel_url()
+
+    try:
+        # Register static path for the JS file
+        await hass.http.async_register_static_paths(
+            [StaticPathConfig(panel_url, panel_file, cache_headers=False)]
+        )
+    except Exception:
+        # Already registered
+        pass
+
+    try:
+        # Register the custom panel in the sidebar
+        await panel_custom.async_register_panel(
+            hass,
+            webcomponent_name="thirdreality-scale-panel",
+            frontend_url_path=PANEL_FRONTEND_PATH,
+            module_url=panel_url,
+            sidebar_title=PANEL_TITLE,
+            sidebar_icon=PANEL_ICON,
+            require_admin=False,
+            config={},
+        )
+    except Exception:
+        # Panel already registered
+        pass
+
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up ThirdReality Scale from a config entry."""
     hass.data.setdefault(DOMAIN, {})
+
+    # Register the frontend panel (only once)
+    await _async_register_panel(hass)
 
     data = entry.data
     platform = data.get(CONF_PLATFORM, PLATFORM_Z2M)
@@ -63,6 +129,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "meal_calorie_warning": f"number.{prefix}_meal_calorie_warning",
         "calorie_status": f"text.{prefix}_calorie_status",
         "meal_log": f"text.{prefix}_meal_log",
+        "calorie_history": f"text.{prefix}_calorie_history",
         # Cocktail entities
         "select_cocktail": f"select.{prefix}_select_cocktail",
         "cocktail_step": f"select.{prefix}_cocktail_step",
@@ -127,15 +194,45 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     else:
         hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _start_reporting)
 
+    # Daily auto-reset at midnight (clear today's calories for a fresh start)
+    if FEATURE_CALORIE in features:
+        async def _daily_reset(now):
+            """Reset today's calories at midnight."""
+            _LOGGER.debug("Midnight auto-reset: clearing today's calories")
+            tracker = entry_data.get("calorie_tracker")
+            if tracker:
+                await tracker.reset_today()
+
+        unsub_midnight = async_track_time_change(hass, _daily_reset, hour=0, minute=0, second=0)
+        entry_data["unsub_midnight"] = unsub_midnight
+
     _LOGGER.info("ThirdReality Scale setup complete. Features: %s", features)
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
+    # Cancel midnight reset timer
+    entry_data = hass.data[DOMAIN].get(entry.entry_id, {})
+    unsub_midnight = entry_data.get("unsub_midnight")
+    if unsub_midnight:
+        unsub_midnight()
+
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id, None)
+
+        # Remove panel if no more entries
+        remaining = [
+            eid for eid in hass.data[DOMAIN]
+            if eid != "food_database" and eid != "cocktail_database"
+        ]
+        if not remaining:
+            try:
+                hass.components.frontend.async_remove_panel(PANEL_FRONTEND_PATH)
+            except Exception:
+                pass
+
     return unload_ok
 
 

@@ -2,16 +2,22 @@
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Default-41BDF5.svg)](https://github.com/hacs/integration)
 
-ThirdReality Smart Scale Integration is a custom component for Home Assistant that works with the ThirdReality Smart Scale (3RKS030Z). It provides a **Cocktail Mixing Assistant** and a **Calorie Tracker** with real-time weight feedback and optional voice guidance.
+ThirdReality Smart Scale Integration is a custom component for Home Assistant that works with the ThirdReality Smart Scale (3RKS030Z). It provides a **Cocktail Mixing Assistant** and a **Calorie Tracker** with real-time weight feedback, 7-day history, and optional voice guidance through a built-in sidebar panel.
 
 > Works best with ThirdReality smart speakers for a fully hands-free experience.
 
 ## Features
 
-- **Cocktail Mixing Assistant** — step-by-step guided mixing with real-time weight tracking
-- **Calorie Tracker** — weigh food, log calories per meal, and get daily intake summaries
-- **Voice guidance** — audio prompts for each step (works with ThirdReality smart speakers)
-- **Auto-creates all helper entities** — zero manual setup after installation
+- **Built-in Sidebar Panel** — "Smart Scale" appears in the sidebar automatically
+- **Cocktail Mixing Assistant** — step-by-step guided mixing with real-time weight tracking and auto-advance
+- **Calorie Tracker** — weigh food, log calories per meal, track daily intake with progress ring and 7-day history chart
+- **160+ Food Presets** — common foods with accurate calorie data (USDA-based), plus custom food support
+- **Quick Add** — recently used foods shown as chips for one-tap selection
+- **Streak & Weekly Average** — tracks consecutive days of use and weekly calorie average
+- **g / oz Unit Toggle** — switch display units on the fly, all internal calculations stay in grams
+- **Voice Guidance** — audio prompts for each step (works with ThirdReality smart speakers )
+- **Daily Auto-Reset** — today's calorie count resets at midnight automatically
+- **Auto-creates all entities** — zero manual setup after installation
 - **Supported platforms:** Zigbee2MQTT, ZHA
 
 ## Requirements
@@ -55,42 +61,48 @@ Check the features you want to enable:
 - **Speaker:** select your `media_player` entity for voice announcements
 
 
-### Step 5: Set Up Dashboards
+### Step 5: Done
 
-After configuration, set up the dashboards:
+After configuration, "Smart Scale" appears in the Home Assistant sidebar. No additional dashboard setup is required.
 
-1. Go to **Settings > Dashboards > + Add Dashboard**
-2. Name it (e.g., "Cocktail" or "Calories"), click Create
-3. Open the new dashboard, click the **⋮ menu** (top right) > **Edit Dashboard** > **⋮ menu** > **Raw configuration editor**
-4. Replace the content with the YAML from one of these files:
-   - **Cocktail Dashboard:** [cocktail_dashboard.yaml](custom_components/thirdreality_scale/dashboards/cocktail_dashboard.yaml)
-   - **Calorie Dashboard:** [calorie_dashboard.yaml](custom_components/thirdreality_scale/dashboards/calorie_dashboard.yaml)
-5. Click **Save**
-
-No modifications needed. The dashboard YAML works directly with the entities created by this integration.
+The panel has four tabs:
+- **Cocktail** — select and mix cocktails
+- **Calories** — track food and daily calorie intake
+- **Recipes** — add or remove cocktail recipes
+- **Foods** — add or remove food presets
 
 
 ## Usage
 
 ### Calorie Tracker
 
-1. Click **Calories** in the sidebar
-2. Select a food from the "Select Food" dropdown (e.g. Apple, Chicken Breast) or enter a custom food name and calories per 100g
-3. Place the food on the scale, the page shows real-time weight and calories
-4. Click **Add +** to log this item to the current meal
+1. Click **Smart Scale** in the sidebar, then the **Calories** tab
+2. Search for a food using the search box, or tap a Quick Add chip at the top
+3. Place the food on the scale — the page shows real-time weight
+4. Click **Add** to log this item to the current meal
 5. Repeat steps 2-4 for more foods
-6. When the meal is done, click **Finish Meal**, the meal total is added to today's count
-7. To start a new day, click **Reset**
+6. When the meal is done, click **Finish Meal** — the meal total is added to today's count and saved to history
+7. The progress ring, 7-day chart, streak counter, and weekly average update automatically
+
+**One-time food:** If a food isn't in the preset list, use the "One-time food" fields below the search box. Enter a name and calories per 100g. This entry is used once and not saved permanently.
+
+**Adding foods permanently:** Go to the **Foods** tab to add items that will appear in the search dropdown for future use.
+
+**Unit toggle:** Tap the `→oz` or `→g` button next to the weight display to switch between grams and ounces.
+
+**Clear Today:** Resets today's calorie count to zero. Your meal history is preserved.
+
+**Daily auto-reset:** At midnight, today's count resets automatically so you start fresh each day.
 
 **Voice prompts:** confirmation on each Add, high-calorie warnings, meal summaries, daily limit alerts.
 
 
 ### Cocktail Mixing
 
-1. Click **Cocktail** in the sidebar
-2. Choose a cocktail from "Choose Your Cocktail" (e.g. Mojito) or select **Custom** and enter your own recipe
+1. Click **Smart Scale** in the sidebar, then the **Cocktail** tab
+2. Choose a cocktail from the dropdown (e.g. Mojito) or select **custom** and enter your own recipe
 3. Click **Start Mixing**
-4. The page shows "Place glass on scale", place your glass and click **Done**
+4. The page shows "Place glass on scale" — place your glass and click **Done**
 5. Follow on-screen prompts: pour each ingredient until the target weight is reached
 6. The scale auto-advances to the next step, or click **Done** manually
 7. When all ingredients are added, **Cheers!** appears and auto-returns to selection after 5 seconds
@@ -98,11 +110,15 @@ No modifications needed. The dashboard YAML works directly with the entities cre
 **Voice prompts:** start instruction, ingredient guidance for each step, completion celebration.
 
 
-### Adding Custom Cocktail Recipes
+### Managing Recipes
 
-1. Go to **Developer Tools > Actions**
-2. Select service `thirdreality_scale.add_cocktail`
-3. Fill in the data and click **Execute**:
+Go to the **Recipes** tab to add or remove cocktail recipes.
+
+Recipe format: `ingredient:weight_in_grams`, separated by commas.
+
+Example: `Tequila:50,Triple Sec:30,Lime Juice:25`
+
+Or via service call:
 
 ```yaml
 action: thirdreality_scale.add_cocktail
@@ -111,9 +127,11 @@ data:
   ingredients: White Rum:50,Pineapple Juice:80,Coconut Cream:30
 ```
 
-Format: `ingredient:weight_in_grams`, separated by commas.
+### Managing Foods
 
-The new cocktail appears in the Cocktail dashboard dropdown immediately.
+Go to the **Foods** tab to add or remove food presets.
+
+Enter the food name and its calories per 100 grams. The new food appears in the search dropdown immediately.
 
 ## Troubleshooting
 
@@ -121,8 +139,8 @@ The new cocktail appears in the Cocktail dashboard dropdown immediately.
 |---------|----------|
 | Scale not in dropdown | Verify scale is connected in Zigbee2MQTT / ZHA |
 | Voice not working | Check that media_player entity is available and TTS is configured |
-| Weight not updating | Press "Start Report" on the scale's ZHA device page |
-| Dashboard not showing data | Ensure integration is configured and HA restarted |
+| Weight not updating | The integration auto-starts reporting on boot. Try restarting HA. |
+| Panel not in sidebar | Restart HA after install. Check the integration loaded without errors in Settings > Integrations. |
 
 ## License
 

@@ -6,6 +6,7 @@ import logging
 from homeassistant.components.text import TextEntity, RestoreText
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
@@ -51,6 +52,14 @@ async def async_setup_entry(
                 name="Meal Log",
                 icon="mdi:notebook-outline",
                 initial_value="Empty",
+                max_length=255,
+            ),
+            ScaleText(
+                entry,
+                key="calorie_history",
+                name="Calorie History",
+                icon="mdi:history",
+                initial_value="",
                 max_length=255,
             ),
         ])
@@ -105,6 +114,7 @@ class ScaleText(RestoreText):
     """A text entity for ThirdReality Scale."""
 
     _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(
         self,
