@@ -28,7 +28,11 @@ from .scale_commands import ScaleCommands
 from .calorie import CalorieTracker
 from .cocktail import CocktailMixer
 
+from homeassistant.helpers import config_validation as cv
+
 _LOGGER = logging.getLogger(__name__)
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 # Platforms registered by this integration
 PLATFORMS = ["sensor", "number", "text", "select", "button"]
@@ -229,7 +233,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ]
         if not remaining:
             try:
-                hass.components.frontend.async_remove_panel(PANEL_FRONTEND_PATH)
+                from homeassistant.components.frontend import async_remove_panel
+                async_remove_panel(hass, PANEL_FRONTEND_PATH)
             except Exception:
                 pass
 
