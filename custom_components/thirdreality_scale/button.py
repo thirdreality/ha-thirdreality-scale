@@ -39,6 +39,13 @@ async def async_setup_entry(
             ),
             ScaleButton(
                 entry,
+                key="undo_add",
+                name="Undo Add",
+                icon="mdi:undo",
+                entity_category=EntityCategory.CONFIG,
+            ),
+            ScaleButton(
+                entry,
                 key="finish_meal",
                 name="Finish Meal",
                 icon="mdi:check-circle",
@@ -115,6 +122,8 @@ class ScaleButton(ButtonEntity):
 
         if self._key == "add_food" and calorie_tracker:
             await calorie_tracker.add_food()
+        elif self._key == "undo_add" and calorie_tracker:
+            await calorie_tracker.undo_add()
         elif self._key == "finish_meal" and calorie_tracker:
             await calorie_tracker.finish_meal()
         elif self._key == "reset_today" and calorie_tracker:

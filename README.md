@@ -22,7 +22,7 @@ ThirdReality Smart Scale Integration is a custom component for Home Assistant th
 
 ## Requirements
 
-- Home Assistant >= 2024.1.0
+- Home Assistant >= 2026.3.0
 - HACS installed and configured
 - A ThirdReality Smart Scale connected via Zigbee2MQTT or ZHA
 
@@ -90,7 +90,7 @@ The panel has four tabs:
 
 **Unit toggle:** Tap the `→oz` or `→g` button next to the weight display to switch between grams and ounces.
 
-**Clear Today:** Resets today's calorie count to zero. Your meal history is preserved.
+**Undo:** Made a mistake? Click **Undo** to remove the last added item.
 
 **Daily auto-reset:** At midnight, today's count resets automatically so you start fresh each day.
 
@@ -118,14 +118,6 @@ Recipe format: `ingredient:weight_in_grams`, separated by commas.
 
 Example: `Tequila:50,Triple Sec:30,Lime Juice:25`
 
-Or via service call:
-
-```yaml
-action: thirdreality_scale.add_cocktail
-data:
-  name: pina_colada
-  ingredients: White Rum:50,Pineapple Juice:80,Coconut Cream:30
-```
 
 ### Managing Foods
 

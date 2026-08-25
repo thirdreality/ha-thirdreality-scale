@@ -10,7 +10,9 @@ class ThirdRealityScalePanel extends LitElement {
       _activeTab: { type: String },
       _foodSearch: { type: String },
       _confirmReset: { type: Boolean },
+      _confirmFinish: { type: Boolean },
       _unit: { type: String },
+      _historyData: { type: Array },
     };
   }
 
@@ -19,7 +21,26 @@ class ThirdRealityScalePanel extends LitElement {
     this._activeTab = "cocktail";
     this._foodSearch = null;
     this._confirmReset = false;
+    this._confirmFinish = false;
     this._unit = localStorage.getItem("tr_scale_unit") || "g";
+    this._historyData = [];
+    this._historyLoaded = false;
+  }
+
+  updated(changedProps) {
+    if (changedProps.has("hass") && this.hass && !this._historyLoaded) {
+      this._loadHistory();
+      this._historyLoaded = true;
+    }
+  }
+
+  async _loadHistory() {
+    try {
+      const result = await this.hass.callWS({ type: "thirdreality_scale/get_calorie_history" });
+      this._historyData = result.history || [];
+    } catch (e) {
+      this._historyData = [];
+    }
   }
 
   _toggleUnit() {
@@ -417,6 +438,14 @@ class ThirdRealityScalePanel extends LitElement {
         </div>
       </div>
 
+      <!-- Current Meal -->
+      ${mealLog && mealLog !== "Empty" && mealLog !== "" ? html`
+        <div class="section">
+          <h3 class="section-title">Current Meal — ${Math.round(mealCal)} kcal</h3>
+          ${mealLog.split(" | ").map(i => html`<div class="log-item">${i}</div>`)}
+        </div>
+      ` : ""}
+
       <!-- Add Food -->
       <div class="section">
         <h3 class="section-title">Add Food</h3>
@@ -460,22 +489,15 @@ class ThirdRealityScalePanel extends LitElement {
         </div>
         <div class="btn-group">
           <button class="btn btn-filled" @click=${this._addFood}>Add</button>
-          <button class="btn btn-success" @click=${this._finishMeal}>Finish Meal</button>
-          ${this._confirmReset
-            ? html`<button class="btn btn-danger" style="font-size:11px;padding:8px 12px" @click=${this._confirmResetAction}>Sure? (history kept)</button>`
-            : html`<button class="btn btn-ghost" style="font-size:11px;padding:8px 12px" @click=${this._resetToday}>Clear Today</button>`
+          <button class="btn btn-outline" @click=${this._undoAdd}>Undo</button>
+          ${this._confirmFinish
+            ? html`<button class="btn btn-danger" @click=${this._confirmFinishAction}>Confirm Finish?</button>`
+            : html`<button class="btn btn-success" @click=${this._finishMealConfirm}>Finish Meal</button>`
           }
         </div>
       </div>
 
       ${status ? html`<div class="status-msg">${status}</div>` : ""}
-
-      ${mealLog && mealLog !== "Empty" && mealLog !== "" ? html`
-        <div class="section">
-          <h3 class="section-title">Current Meal — ${Math.round(mealCal)} kcal</h3>
-          ${mealLog.split(" | ").map(i => html`<div class="log-item">${i}</div>`)}
-        </div>
-      ` : ""}
 
     `;
   }
@@ -548,14 +570,12 @@ class ThirdRealityScalePanel extends LitElement {
   }
 
   _renderTodayMeals() {
-    const historyRaw = this._getState("text.thirdreality_smart_scale_calorie_history");
-    if (!historyRaw) return "";
+    if (!this._historyData || this._historyData.length === 0) return "";
 
     const todayStr = new Date().toISOString().split("T")[0];
-    const days = this._parseHistory(historyRaw);
-    const today = days.find(d => d.date === todayStr);
+    const today = this._historyData.find(d => d.date === todayStr);
 
-    if (!today || today.meals.length === 0) return "";
+    if (!today || !today.meals || today.meals.length === 0) return "";
 
     return html`
       <div class="section">
@@ -572,21 +592,18 @@ class ThirdRealityScalePanel extends LitElement {
   }
 
   _renderMiniHistory(dailyTarget) {
-    const historyRaw = this._getState("text.thirdreality_smart_scale_calorie_history");
     const todayCal = parseFloat(this._getState("number.thirdreality_smart_scale_today_calories")) || 0;
     const today = new Date();
     const todayStr = today.toISOString().split("T")[0];
 
-    // Build a map of date -> total from history
+    // Build a map of date -> total from history (via WebSocket data)
     const historyMap = {};
-    if (historyRaw) {
-      const days = this._parseHistory(historyRaw);
-      for (const d of days) historyMap[d.date] = d.total;
+    if (this._historyData) {
+      for (const d of this._historyData) historyMap[d.date] = d.total;
     }
-    // Always use live today_calories for today
-    if (todayCal > 0 || historyMap[todayStr]) {
-      historyMap[todayStr] = Math.round(todayCal) || historyMap[todayStr] || 0;
-    }
+    // Use the higher of today_calories or history total for today
+    const historyToday = historyMap[todayStr] || 0;
+    historyMap[todayStr] = Math.max(Math.round(todayCal), historyToday);
 
     // Generate last 7 days (always show 7 slots)
     const slots = [];
@@ -645,10 +662,8 @@ class ThirdRealityScalePanel extends LitElement {
   }
 
   _getStreak() {
-    const historyRaw = this._getState("text.thirdreality_smart_scale_calorie_history");
-    if (!historyRaw) return 0;
-    const days = this._parseHistory(historyRaw);
-    const datesWithData = new Set(days.map(d => d.date));
+    if (!this._historyData || this._historyData.length === 0) return 0;
+    const datesWithData = new Set(this._historyData.map(d => d.date));
     // Also count today if today_calories > 0
     const todayCal = parseFloat(this._getState("number.thirdreality_smart_scale_today_calories")) || 0;
     const todayStr = new Date().toISOString().split("T")[0];
@@ -670,10 +685,8 @@ class ThirdRealityScalePanel extends LitElement {
   }
 
   _getBestStreak() {
-    const historyRaw = this._getState("text.thirdreality_smart_scale_calorie_history");
-    if (!historyRaw) return 0;
-    const days = this._parseHistory(historyRaw);
-    const datesWithData = new Set(days.map(d => d.date));
+    if (!this._historyData || this._historyData.length === 0) return 0;
+    const datesWithData = new Set(this._historyData.map(d => d.date));
     const todayCal = parseFloat(this._getState("number.thirdreality_smart_scale_today_calories")) || 0;
     if (todayCal > 0) datesWithData.add(new Date().toISOString().split("T")[0]);
 
@@ -694,14 +707,12 @@ class ThirdRealityScalePanel extends LitElement {
   }
 
   _getWeekAvg() {
-    const historyRaw = this._getState("text.thirdreality_smart_scale_calorie_history");
     const todayCal = parseFloat(this._getState("number.thirdreality_smart_scale_today_calories")) || 0;
     const todayStr = new Date().toISOString().split("T")[0];
 
     const historyMap = {};
-    if (historyRaw) {
-      const days = this._parseHistory(historyRaw);
-      for (const d of days) historyMap[d.date] = d.total;
+    if (this._historyData) {
+      for (const d of this._historyData) historyMap[d.date] = d.total;
     }
     if (todayCal > 0) historyMap[todayStr] = todayCal;
 
@@ -781,7 +792,7 @@ class ThirdRealityScalePanel extends LitElement {
   }
 
   _parseHistory(raw) {
-    // Format: date:total:meal1_time=cal,meal2_time=cal|date:total:...
+    // Format: date:total:time=cal=items,time=cal=items|date:total:...
     if (!raw) return [];
     const days = [];
     for (const dayStr of raw.split("|")) {
@@ -793,9 +804,12 @@ class ThirdRealityScalePanel extends LitElement {
       const meals = [];
       if (mealsStr) {
         for (const mealStr of mealsStr.split(",")) {
-          const [time, cal] = mealStr.split("=");
+          const eqParts = mealStr.split("=");
+          const time = eqParts[0] || "";
+          const cal = parseInt(eqParts[1]) || 0;
+          const items = eqParts.slice(2).join("=") || "";  // rejoin remaining as items
           if (time && cal) {
-            meals.push({ time, cal: parseInt(cal) || 0 });
+            meals.push({ time, cal, items });
           }
         }
       }
@@ -912,7 +926,17 @@ class ThirdRealityScalePanel extends LitElement {
   _onCustomFoodNameChange(e) { this.hass.callService("text", "set_value", { entity_id: "text.thirdreality_smart_scale_custom_food_name", value: e.target.value }); }
   _onCustomCalChange(e) { this.hass.callService("number", "set_value", { entity_id: "number.thirdreality_smart_scale_custom_cal_per_100g", value: parseFloat(e.target.value) || 0 }); }
   _addFood() { this.hass.callService("button", "press", { entity_id: "button.thirdreality_smart_scale_add_food" }); }
-  _finishMeal() { this.hass.callService("button", "press", { entity_id: "button.thirdreality_smart_scale_finish_meal" }); }
+  _undoAdd() { this.hass.callService("button", "press", { entity_id: "button.thirdreality_smart_scale_undo_add" }); }
+  _finishMealConfirm() {
+    this._confirmFinish = true;
+    setTimeout(() => { this._confirmFinish = false; this.requestUpdate(); }, 3000);
+  }
+  _confirmFinishAction() {
+    this._confirmFinish = false;
+    this.hass.callService("button", "press", { entity_id: "button.thirdreality_smart_scale_finish_meal" });
+    // Refresh history after finishing meal (delay to let backend save)
+    setTimeout(() => this._loadHistory(), 2000);
+  }
   _resetToday() {
     // First tap: show confirmation state
     this._confirmReset = true;

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import json
 from pathlib import Path
 
 from homeassistant.config_entries import ConfigEntry
@@ -28,7 +29,9 @@ from .scale_commands import ScaleCommands
 from .calorie import CalorieTracker
 from .cocktail import CocktailMixer
 
+from homeassistant.components import websocket_api
 from homeassistant.helpers import config_validation as cv
+import voluptuous as vol
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -42,21 +45,38 @@ PANEL_TITLE = "Smart Scale"
 PANEL_ICON = "mdi:scale"
 PANEL_FRONTEND_PATH = "thirdreality-scale"
 
-def _get_panel_url():
-    """Generate panel URL with file hash for cache busting."""
-    import hashlib
-    panel_file = Path(__file__).parent / "frontend" / "dist" / "thirdreality-scale-panel.js"
-    try:
-        file_hash = hashlib.md5(panel_file.read_bytes()).hexdigest()[:8]
-    except Exception:
-        file_hash = "latest"
-    return f"/thirdreality_scale_panel_{file_hash}"
+_MANIFEST = json.loads((Path(__file__).parent / "manifest.json").read_text(encoding="utf-8"))
+INTEGRATION_VERSION = _MANIFEST["version"]
+PANEL_URL = f"/thirdreality_scale_panel_{INTEGRATION_VERSION}"
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the ThirdReality Scale component."""
     hass.data.setdefault(DOMAIN, {})
+
+    # Register WebSocket API for frontend to fetch calorie history
+    websocket_api.async_register_command(hass, ws_get_calorie_history)
+
     return True
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/get_calorie_history",
+    }
+)
+@websocket_api.async_response
+async def ws_get_calorie_history(hass, connection, msg):
+    """Handle get calorie history WebSocket command."""
+    # Find the first calorie tracker instance
+    for entry_id, entry_data in hass.data.get(DOMAIN, {}).items():
+        tracker = entry_data.get("calorie_tracker") if isinstance(entry_data, dict) else None
+        if tracker:
+            history_json = await tracker.get_history_json()
+            connection.send_result(msg["id"], {"history": json.loads(history_json)})
+            return
+
+    connection.send_result(msg["id"], {"history": []})
 
 
 async def _async_register_panel(hass: HomeAssistant) -> None:
@@ -71,7 +91,7 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
     # Path to the actual JS file (not directory!)
     panel_file = str(Path(__file__).parent / "frontend" / "dist" / "thirdreality-scale-panel.js")
 
-    panel_url = _get_panel_url()
+    panel_url = PANEL_URL
 
     try:
         # Register static path for the JS file

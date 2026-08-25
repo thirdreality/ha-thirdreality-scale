@@ -1,7 +1,7 @@
 """Calorie Tracker business logic for ThirdReality Smart Scale.
 
 Handles:
-- add_food: calculate calories, update meal log, tare scale, TTS announce
+- add_food: calculate calories, update meal log, TTS announce
 - finish_meal: add meal total to today's total, TTS summary, clear meal, save history
 - reset_today: clear all calorie data
 - get_history: retrieve calorie history
@@ -27,6 +27,7 @@ class CalorieTracker:
         """Initialize."""
         self._hass = hass
         self._entry_id = entry_id
+        self._last_add: dict | None = None  
 
     @property
     def _data(self) -> dict:
@@ -88,11 +89,18 @@ class CalorieTracker:
         current_meal_cal = _get_float(hass, meal_cal_eid)
         new_meal_total = round(current_meal_cal + current_cal)
 
+        # Save undo state before modifying
+        self._last_add = {
+            "calories": current_cal,
+            "prev_meal_cal": current_meal_cal,
+            "prev_log": _get_state(hass, meal_log_eid),
+        }
+
         # Update meal calories
         await _set_number(hass, meal_cal_eid, new_meal_total)
 
         # Update meal log
-        current_log = _get_state(hass, meal_log_eid)
+        current_log = self._last_add["prev_log"]
         new_entry = f"{food_name} {round(current_weight)}g={current_cal}cal"
         if current_log and current_log not in ("Empty", "unknown", "unavailable", ""):
             new_log = f"{current_log} | {new_entry}"
@@ -114,12 +122,24 @@ class CalorieTracker:
             + (f" Warning: This meal is already {new_meal_total} calories, exceeding your meal target." if new_meal_total > self._get_meal_warning() else "")
         )
 
-        # Tare scale
-        await self._commands.tare()
-
         # Clear custom inputs
         await _set_text(hass, custom_name_eid, "")
         await _set_number(hass, custom_cal_eid, 0)
+
+    async def undo_add(self) -> None:
+        """Undo the last add_food action."""
+        if not self._last_add:
+            return
+        hass = self._hass
+        meal_cal_eid = self._entity_id("meal_calories")
+        meal_log_eid = self._entity_id("meal_log")
+        status_eid = self._entity_id("calorie_status")
+
+        await _set_number(hass, meal_cal_eid, self._last_add["prev_meal_cal"])
+        prev_log = self._last_add["prev_log"]
+        await _set_text(hass, meal_log_eid, prev_log if prev_log else "Empty")
+        await _set_text(hass, status_eid, f"↩️ Undone: -{self._last_add['calories']} kcal")
+        self._last_add = None
 
     async def finish_meal(self) -> None:
         """Finish the current meal: add to today's total, clear meal, save history."""
@@ -270,8 +290,7 @@ class CalorieTracker:
         sorted_days = sorted(daily_data.keys(), reverse=True)[:7]
         result = [daily_data[d] for d in sorted_days]
 
-        # Truncate to fit in 255 chars — use compact format
-        # Format: date:total:meal1_time=cal,meal2_time=cal|date:total:...
+        # Format: date:total:time=cal,time=cal|date:total:...
         compact_lines = []
         for day in result:
             meals_str = ",".join(
@@ -280,12 +299,7 @@ class CalorieTracker:
             compact_lines.append(f"{day['date']}:{day['total']}:{meals_str}")
 
         history_str = "|".join(compact_lines)
-        # If too long, trim older days
-        while len(history_str) > 255 and len(compact_lines) > 1:
-            compact_lines.pop()
-            history_str = "|".join(compact_lines)
-
-        await _set_text(hass, history_eid, history_str[:255])
+        await _set_text(hass, history_eid, history_str)
 
     async def get_history_json(self) -> str:
         """Get full history as JSON string (for API/frontend use)."""
